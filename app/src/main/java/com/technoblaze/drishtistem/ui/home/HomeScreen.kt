@@ -38,12 +38,17 @@ private val SubjectColors = mapOf(
 )
 
 @Composable
-fun HomeScreen(engines: Engines, onSubject: (Subject) -> Unit, onScan: () -> Unit) {
+fun HomeScreen(
+    engines: Engines,
+    onSubject: (Subject) -> Unit,
+    onScanMolecule: () -> Unit,
+    onScanGraph: () -> Unit
+) {
     LaunchedEffect(Unit) {
         engines.speech.announce(
             "Welcome to Drishti STEM. Turning visual STEM into touch and sound. " +
                 "Choose a subject: Mathematics, Physics, or Chemistry. " +
-                "Or use upload a molecule or graph to read a photo of a printed structure.",
+                "Or upload a graph, or upload a molecule, to read a photo.",
             interrupt = true
         )
     }
@@ -96,32 +101,40 @@ fun HomeScreen(engines: Engines, onSubject: (Subject) -> Unit, onScan: () -> Uni
             }
         }
 
-        // Upload a photo of a printed structure and explore it by touch.
-        Card(
-            onClick = {
-                engines.haptics.tick()
-                onScan()
-            },
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF3A2E12)),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(96.dp)
-                .semantics {
-                    contentDescription =
-                        "Upload a structure. Choose a photo of a molecule or graph and explore it by touch. Double tap to open."
-                }
+        // Upload a photo of a printed graph — deterministic CV pipeline.
+        ScanCard(
+            title = "📈  Upload a graph",
+            subtitle = "Trace a printed graph by touch",
+            description = "Upload a graph. Choose a photo of a printed line graph and explore the curve by touch. Double tap to open.",
+            onClick = { engines.haptics.tick(); onScanGraph() }
+        )
+
+        // Upload a photo of a molecular structure — Gemma 3n.
+        ScanCard(
+            title = "🧪  Upload a molecule",
+            subtitle = "Explore a structure by touch",
+            description = "Upload a molecule. Choose a photo of a molecular structure and explore the atoms by touch. Double tap to open.",
+            onClick = { engines.haptics.tick(); onScanMolecule() }
+        )
+    }
+}
+
+@Composable
+private fun ScanCard(title: String, subtitle: String, description: String, onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF3A2E12)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(96.dp)
+            .semantics { contentDescription = description }
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(20.dp),
+            verticalArrangement = Arrangement.Center
         ) {
-            Column(
-                modifier = Modifier.fillMaxSize().padding(20.dp),
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text("🖼  Upload a molecule or graph", color = Color(0xFFE8C49A), fontSize = 22.sp)
-                Text(
-                    "Read a photo of a printed structure",
-                    color = Color(0xFFBDBDBD),
-                    fontSize = 14.sp
-                )
-            }
+            Text(title, color = Color(0xFFE8C49A), fontSize = 22.sp)
+            Text(subtitle, color = Color(0xFFBDBDBD), fontSize = 14.sp)
         }
     }
 }
