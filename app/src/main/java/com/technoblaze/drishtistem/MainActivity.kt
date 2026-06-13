@@ -15,10 +15,12 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.technoblaze.drishtistem.core.Engines
 import com.technoblaze.drishtistem.data.ConceptRepository
+import com.technoblaze.drishtistem.data.ScannedGraphStore
 import com.technoblaze.drishtistem.model.GraphConcept
 import com.technoblaze.drishtistem.model.MoleculeConcept
 import com.technoblaze.drishtistem.model.Subject
 import com.technoblaze.drishtistem.model.WaveConcept
+import com.technoblaze.drishtistem.ui.camera.CameraScreen
 import com.technoblaze.drishtistem.ui.graph.GraphExplorerScreen
 import com.technoblaze.drishtistem.ui.home.HomeScreen
 import com.technoblaze.drishtistem.ui.home.SubjectScreen
@@ -71,8 +73,29 @@ private fun DrishtiNavHost(engines: Engines) {
 
     NavHost(navController = navController, startDestination = "home") {
         composable("home") {
-            HomeScreen(engines) { subject ->
-                navController.navigate("subject/${subject.name}")
+            HomeScreen(
+                engines = engines,
+                onSubject = { subject -> navController.navigate("subject/${subject.name}") },
+                onScan = { navController.navigate("camera") }
+            )
+        }
+        composable("camera") {
+            CameraScreen(
+                engines = engines,
+                onGraphReady = {
+                    // Replace the camera screen so Back returns home, not to the lens.
+                    navController.navigate("scanned") {
+                        popUpTo("camera") { inclusive = true }
+                    }
+                },
+                onBack = { navController.popBackStack() }
+            )
+        }
+        composable("scanned") {
+            val onBack: () -> Unit = { navController.popBackStack() }
+            when (val concept = ScannedGraphStore.current) {
+                is GraphConcept -> GraphExplorerScreen(concept, engines, onBack)
+                else -> onBack()
             }
         }
         composable(

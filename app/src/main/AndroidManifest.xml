@@ -3,6 +3,9 @@
 
     <!-- Offline by design: no INTERNET permission. -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Camera is used only for on-device graph scanning; images never leave the phone. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
     <application
         android:allowBackup="true"
