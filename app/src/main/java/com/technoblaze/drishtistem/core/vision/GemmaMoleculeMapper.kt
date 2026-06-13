@@ -9,6 +9,7 @@ import com.technoblaze.drishtistem.model.MoleculeConcept
 import com.technoblaze.drishtistem.model.Subject
 import org.json.JSONObject
 import kotlin.math.PI
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
@@ -19,8 +20,10 @@ import kotlin.math.sin
  * MoleculeScreen and GraphExplorerScreen render scanned content unchanged.
  *
  * Gemma supplies elements and connectivity but not reliable 2D coordinates, so
- * [layout] computes positions: the most-connected atom sits near the centre and
- * its neighbours fan out around it — good enough for small molecules.
+ * [layout] computes positions: ring atoms are placed as a regular polygon; all
+ * other atoms are placed BFS-outward from the ring. Acyclic molecules use the
+ * centre-fan fallback. Bond output from the model is deduplicated and capped at
+ * each element's chemical valence before layout to eliminate spurious cross-bonds.
  */
 object GemmaMoleculeMapper {
 
@@ -52,7 +55,7 @@ object GemmaMoleculeMapper {
             elements.add(Element.fromSymbol(sym))
         }
 
-        val bonds = ArrayList<Bond>()
+        val rawBonds = ArrayList<Bond>()
         if (obj.has("bonds")) {
             val bondsJson = obj.getJSONArray("bonds")
             for (i in 0 until bondsJson.length()) {
@@ -61,10 +64,13 @@ object GemmaMoleculeMapper {
                 val to = b.optInt("to", -1)
                 if (from in elements.indices && to in elements.indices && from != to) {
                     val order = b.optInt("order", 1).coerceIn(1, 3)
-                    bonds.add(Bond(from, to, order = order))
+                    rawBonds.add(Bond(from, to, order = order))
                 }
             }
         }
+
+        // Remove duplicate bonds and cap at max chemical valence before layout.
+        val bonds = cleanBonds(elements, rawBonds)
 
         val positions = layout(elements.size, bonds)
         val atoms = elements.indices.map { i ->
@@ -123,15 +129,52 @@ object GemmaMoleculeMapper {
         return samples[i] * (1 - frac) + samples[i + 1] * frac
     }
 
+    /** Maximum covalent bonds each element can form. */
+    private fun maxValence(e: Element): Int = when (e) {
+        Element.HYDROGEN, Element.FLUORINE, Element.CHLORINE, Element.SODIUM -> 1
+        Element.OXYGEN, Element.SULFUR -> 2
+        Element.NITROGEN -> 3
+        Element.CARBON -> 4
+        Element.PHOSPHORUS -> 5
+        Element.GENERIC -> 4
+    }
+
+    /**
+     * Deduplicate bonds (a→b == b→a) then drop any bond that would exceed either
+     * atom's max valence. Bonds between heavier atoms are kept first so that
+     * the carbon skeleton and polar bonds survive; excess C–H bonds are shed last.
+     */
+    private fun cleanBonds(elements: List<Element>, raw: List<Bond>): List<Bond> {
+        val seen = HashSet<Long>()
+        val unique = raw.filter { b ->
+            val key = minOf(b.fromIndex, b.toIndex).toLong() * 10_000 +
+                      maxOf(b.fromIndex, b.toIndex)
+            seen.add(key)
+        }
+        val degree = IntArray(elements.size)
+        return unique
+            .sortedByDescending { b ->
+                elements[b.fromIndex].atomicNumber + elements[b.toIndex].atomicNumber
+            }
+            .filter { b ->
+                val ok = degree[b.fromIndex] < maxValence(elements[b.fromIndex]) &&
+                         degree[b.toIndex]   < maxValence(elements[b.toIndex])
+                if (ok) { degree[b.fromIndex]++; degree[b.toIndex]++ }
+                ok
+            }
+    }
+
     /**
      * Place atoms in normalised 0..1 coordinates.
      *
-     * If the bond graph contains a ring of ≥ 4 atoms (e.g. benzene), those atoms
-     * are arranged as a regular polygon and substituents radiate outward from their
-     * ring atom. For acyclic molecules the previous centre-fan heuristic is used:
-     * the highest-degree atom sits near the centre and its neighbours fan out
-     * (downward arc for ≤3, full circle for 4+). Remaining atoms are tucked beside
-     * an already-placed neighbour.
+     * Strategy for ring molecules (detected by [findSmallestRing]):
+     *   1. Place the ring atoms as a regular polygon centred at (0.5, 0.5).
+     *   2. BFS outward from every ring atom: each unplaced neighbour is positioned
+     *      in the direction already established by its parent, spreading multiple
+     *      substituents ±30° around that direction. This correctly handles chains
+     *      like –COOH without them bunching up on one side.
+     *
+     * Acyclic molecules fall through to the centre-fan heuristic.
      */
     fun layout(n: Int, bonds: List<Bond>): List<Pair<Float, Float>> {
         if (n == 1) return listOf(0.5f to 0.5f)
@@ -151,10 +194,9 @@ object GemmaMoleculeMapper {
         }
 
         val pos = arrayOfNulls<Pair<Float, Float>>(n)
-        val ring = findLargestRing(n, adj)
+        val ring = findSmallestRing(n, adj)
 
         if (ring != null && ring.size >= 4) {
-            // Arrange ring atoms as a regular polygon centred at (0.5, 0.5).
             val ringRadius = if (ring.size <= 6) 0.27f else 0.34f
             val ringSet = ring.toHashSet()
             ring.forEachIndexed { i, atom ->
@@ -162,21 +204,36 @@ object GemmaMoleculeMapper {
                 pos[atom] = (0.5f + ringRadius * cos(angle)).toFloat().coerceIn(0.08f, 0.92f) to
                             (0.5f + ringRadius * sin(angle)).toFloat().coerceIn(0.08f, 0.92f)
             }
-            // Substituents: point radially outward from their ring neighbour.
-            val substituteRadius = 0.18f
-            for (i in 0 until n) {
-                if (pos[i] != null) continue
-                val ringNb = adj[i].firstOrNull { it in ringSet } ?: continue
-                val (rx, ry) = pos[ringNb]!!
-                val dx = rx - 0.5f
-                val dy = ry - 0.5f
-                val len = hypot(dx, dy).coerceAtLeast(0.01f)
-                pos[i] = (rx + dx / len * substituteRadius).coerceIn(0.05f, 0.95f) to
-                         (ry + dy / len * substituteRadius).coerceIn(0.05f, 0.95f)
+
+            // BFS outward from ring: propagate direction so chains (e.g. –COOH) extend
+            // in a straight line rather than bunching.
+            val outAngle = DoubleArray(n)
+            for (ringAtom in ring) {
+                val (rx, ry) = pos[ringAtom]!!
+                outAngle[ringAtom] = atan2((ry - 0.5).toDouble(), (rx - 0.5).toDouble())
+            }
+            val bfsVisited = BooleanArray(n) { pos[it] != null }
+            val bfsQueue = ArrayDeque<Int>().also { q -> ring.forEach(q::add) }
+
+            while (bfsQueue.isNotEmpty()) {
+                val cur = bfsQueue.removeFirst()
+                val (cx, cy) = pos[cur]!!
+                val unplaced = adj[cur].filter { !bfsVisited[it] }
+                val count = unplaced.size
+                unplaced.forEachIndexed { idx, nb ->
+                    bfsVisited[nb] = true
+                    val spread = if (count == 1) 0.0
+                                 else Math.toRadians(-30.0 + 60.0 * idx / (count - 1))
+                    val angle = outAngle[cur] + spread
+                    outAngle[nb] = angle
+                    pos[nb] = (cx + 0.18f * cos(angle)).toFloat().coerceIn(0.05f, 0.95f) to
+                              (cy + 0.18f * sin(angle)).toFloat().coerceIn(0.05f, 0.95f)
+                    bfsQueue.add(nb)
+                }
             }
         }
 
-        // Fallback / acyclic: centre-fan for any atoms not yet placed.
+        // Fallback / acyclic: centre-fan for atoms not yet placed.
         val center = (0 until n).filter { pos[it] == null }.maxByOrNull { degree[it] }
         if (center != null) {
             pos[center] = 0.5f to 0.42f
@@ -212,8 +269,13 @@ object GemmaMoleculeMapper {
         return pos.map { it!! }
     }
 
-    /** DFS cycle search — returns atom indices of the largest simple ring, or null. */
-    private fun findLargestRing(n: Int, adj: Array<MutableList<Int>>): List<Int>? {
+    /**
+     * DFS cycle search — returns the atom indices of the SMALLEST simple ring
+     * (≥ 4 atoms), or null if the graph is acyclic. Preferring the smallest ring
+     * finds the true aromatic ring (e.g. benzene's 6-cycle) rather than a spurious
+     * larger cycle that can arise from LLM-generated cross-bonds.
+     */
+    private fun findSmallestRing(n: Int, adj: Array<MutableList<Int>>): List<Int>? {
         var best: List<Int>? = null
         val visited = BooleanArray(n)
         val path = ArrayDeque<Int>()
@@ -228,7 +290,7 @@ object GemmaMoleculeMapper {
                 if (inPath[nb]) {
                     val idx = path.indexOf(nb)
                     val cycle = path.subList(idx, path.size).toList()
-                    if (best == null || cycle.size > best!!.size) best = cycle
+                    if (cycle.size >= 4 && (best == null || cycle.size < best!!.size)) best = cycle
                 } else if (!visited[nb]) {
                     dfs(nb, node)
                 }
