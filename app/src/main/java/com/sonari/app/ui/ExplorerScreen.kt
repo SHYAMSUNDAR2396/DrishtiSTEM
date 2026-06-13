@@ -82,6 +82,8 @@ fun ExplorerScreen(
     sonifier: Sonifier,
     haptics: Haptics,
     announcer: Announcer,
+    onNavigateHome: () -> Unit = {},
+    onNavigateSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val sweepPlayer = remember { SweepPlayer(sonifier, haptics, announcer) }
@@ -97,7 +99,7 @@ fun ExplorerScreen(
             .fillMaxSize()
             .background(BG)
     ) {
-        AppHeader()
+        AppHeader(onNavigateHome = onNavigateHome, onNavigateSettings = onNavigateSettings)
         ModeSelector(
             current = mode,
             onSelect = { m ->
@@ -118,13 +120,25 @@ fun ExplorerScreen(
 // ─── Header & mode selector ──────────────────────────────────────────────────
 
 @Composable
-private fun AppHeader() {
-    Text(
-        text = "Sonari",
-        color = Color.White,
-        fontSize = 22.sp,
-        modifier = Modifier.padding(start = 16.dp, top = 14.dp, bottom = 2.dp)
-    )
+private fun AppHeader(onNavigateHome: () -> Unit, onNavigateSettings: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = "Sonari", color = Color.White, fontSize = 22.sp, modifier = Modifier.weight(1f))
+        Button(
+            onClick = onNavigateHome,
+            colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+            modifier = Modifier.semantics { contentDescription = "Back to home" }
+        ) { Text("Home", color = Color(0xFF888888), fontSize = 13.sp) }
+        Button(
+            onClick = onNavigateSettings,
+            colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+            modifier = Modifier.semantics { contentDescription = "Settings" }
+        ) { Text("Settings", color = Color(0xFF888888), fontSize = 13.sp) }
+    }
 }
 
 @Composable
