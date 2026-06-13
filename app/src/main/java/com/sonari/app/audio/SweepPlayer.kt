@@ -1,7 +1,9 @@
 package com.sonari.app.audio
 
 import com.sonari.app.a11y.Announcer
+import com.sonari.app.engine.DefaultMappingEngine
 import com.sonari.app.haptic.Haptics
+import com.sonari.app.model.BarChart
 import com.sonari.app.model.LineChart
 import com.sonari.app.model.Renderable
 import kotlinx.coroutines.delay
@@ -13,8 +15,6 @@ class SweepPlayer(
     private val haptics: Haptics,
     private val announcer: Announcer
 ) {
-    private val freqLow = 200.0
-    private val freqHigh = 1000.0
 
     // Sweep left→right. Suspend until sweep completes or coroutine is cancelled.
     // onProgress: called each frame with normX in [0,1] for UI playhead.
@@ -23,8 +23,18 @@ class SweepPlayer(
         durationMs: Long = 5_000L,
         onProgress: (Float) -> Unit
     ) {
-        if (renderable !is LineChart) return
+        when (renderable) {
+            is LineChart -> sweepLineChart(renderable, durationMs, onProgress)
+            is BarChart -> sweepBarChart(renderable, durationMs, onProgress)
+            else -> return
+        }
+    }
 
+    private suspend fun sweepLineChart(
+        renderable: LineChart,
+        durationMs: Long,
+        onProgress: (Float) -> Unit
+    ) {
         val stepMs = 20L
         val steps = (durationMs / stepMs).toInt()
         val firedLandmarks = mutableSetOf<Int>()
@@ -32,7 +42,9 @@ class SweepPlayer(
         for (step in 0..steps) {
             val normX = step.toDouble() / steps
             val normY = curveNormY(normX, renderable)
-            val freqHz = freqLow * (freqHigh / freqLow).pow(normY)
+            val fLow = DefaultMappingEngine.freqLow
+            val fHigh = DefaultMappingEngine.freqHigh
+            val freqHz = fLow * (fHigh / fLow).pow(normY)
 
             // In Overview, pan = 0 — works on device speaker, no headphones required.
             sonifier.setCue(freqHz, pan = 0.0, active = true)
@@ -50,6 +62,32 @@ class SweepPlayer(
             delay(stepMs)
         }
 
+        sonifier.setCue(440.0, 0.0, active = false)
+        onProgress(0f)
+    }
+
+    private suspend fun sweepBarChart(
+        renderable: BarChart,
+        durationMs: Long,
+        onProgress: (Float) -> Unit
+    ) {
+        if (renderable.bars.isEmpty()) return
+        val barCount = renderable.bars.size
+        val perBarMs = durationMs / barCount
+        val yRange = renderable.yMax - renderable.yMin
+
+        renderable.bars.forEachIndexed { i, bar ->
+            val normY = if (yRange > 0) ((bar.value - renderable.yMin) / yRange).coerceIn(0.0, 1.0) else 0.5
+            val fLow = DefaultMappingEngine.freqLow
+            val fHigh = DefaultMappingEngine.freqHigh
+            val freqHz = fLow * (fHigh / fLow).pow(normY)
+            val normX = ((i + 0.5) / barCount).toFloat()
+            sonifier.setCue(freqHz, pan = 0.0, active = true)
+            onProgress(normX)
+            haptics.landmark()
+            announcer.landmark(renderable.landmarks[i])
+            delay(perBarMs)
+        }
         sonifier.setCue(440.0, 0.0, active = false)
         onProgress(0f)
     }

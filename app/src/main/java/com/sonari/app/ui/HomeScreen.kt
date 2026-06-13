@@ -1,5 +1,7 @@
 package com.sonari.app.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -30,12 +32,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.sonari.app.data.CsvLoader
 import com.sonari.app.data.EquationLoader
 import com.sonari.app.data.MoleculeLoader
 import com.sonari.app.model.Renderable
@@ -50,7 +55,7 @@ private val TAB_ACTIVE = Color(0xFF4FC3F7)
 private val TAB_INACTIVE = Color(0xFF2C2D31)
 private val ERROR = Color(0xFFEF5350)
 
-private enum class InputMode { EQUATION, MOLECULE }
+private enum class InputMode { EQUATION, MOLECULE, CSV }
 
 private val EQUATION_PRESETS = listOf(
     "x^2" to "Parabola",
@@ -122,6 +127,7 @@ fun HomeScreen(
         when (inputMode) {
             InputMode.EQUATION -> EquationPanel(onLoad)
             InputMode.MOLECULE -> MoleculePanel(onLoad)
+            InputMode.CSV -> CsvPanel(onLoad)
         }
     }
 }
@@ -312,6 +318,110 @@ private fun MoleculePanel(onLoad: (Renderable) -> Unit) {
                 .semantics { contentDescription = "$mol molecule preset" }
         ) {
             Text(mol.replaceFirstChar { it.uppercaseChar() }, color = ACCENT, fontSize = 14.sp)
+        }
+    }
+}
+
+// ─── CSV panel ────────────────────────────────────────────────────────────────
+
+@Composable
+private fun CsvPanel(onLoad: (Renderable) -> Unit) {
+    var csvText by rememberSaveable { mutableStateOf("") }
+    var errorMsg by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val text = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)?.bufferedReader()?.readText()
+                }.getOrNull()
+            }
+            if (text != null) { csvText = text; errorMsg = "" }
+            else errorMsg = "Could not read file"
+        }
+    }
+
+    fun tryLoad() {
+        if (csvText.isBlank()) { errorMsg = "Paste CSV text or pick a file"; return }
+        CsvLoader.load(csvText)
+            .onSuccess { r -> errorMsg = ""; onLoad(r) }
+            .onFailure { e -> errorMsg = e.message ?: "Parse error" }
+    }
+
+    Text("CSV data", color = Color(0xFFCCCCCC), fontSize = 13.sp)
+    Spacer(modifier = Modifier.height(4.dp))
+    Text(
+        "Two columns: x,y (numeric) for a line/scatter chart\nor category,value for a bar chart.",
+        color = Color(0xFF888888),
+        fontSize = 11.sp
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+
+    OutlinedTextField(
+        value = csvText,
+        onValueChange = { csvText = it; errorMsg = "" },
+        placeholder = { Text("x,y\n0,0\n1,1\n2,4", color = Color(0xFF555555), fontSize = 11.sp) },
+        colors = fieldColors(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(160.dp)
+            .semantics { contentDescription = "CSV text input" }
+    )
+
+    if (errorMsg.isNotEmpty()) {
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(errorMsg, color = ERROR, fontSize = 12.sp)
+    }
+
+    Spacer(modifier = Modifier.height(12.dp))
+
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+        Button(
+            onClick = { filePicker.launch("text/*") },
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2C2D31)),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier
+                .weight(1f)
+                .height(52.dp)
+                .semantics { contentDescription = "Pick CSV file" }
+        ) { Text("Pick file", color = ACCENT, fontSize = 15.sp) }
+
+        Button(
+            onClick = ::tryLoad,
+            colors = ButtonDefaults.buttonColors(containerColor = ACCENT),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier
+                .weight(1f)
+                .height(52.dp)
+                .semantics { contentDescription = "Explore CSV data" }
+        ) { Text("Explore", color = Color.Black, fontSize = 15.sp) }
+    }
+
+    Spacer(modifier = Modifier.height(20.dp))
+    Text("Example CSV formats", color = Color(0xFF888888), fontSize = 12.sp)
+    Spacer(modifier = Modifier.height(8.dp))
+
+    listOf(
+        "x,y\n0,0\n1,1\n2,4\n3,9" to "Numeric x,y (scatter/line)",
+        "category,value\nMath,85\nScience,92\nArt,78" to "Category,value (bar chart)"
+    ).forEach { (example, label) ->
+        Button(
+            onClick = { csvText = example; errorMsg = "" },
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2C2D31)),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp)
+                .semantics { contentDescription = "$label example" }
+        ) {
+            Column {
+                Text(label, color = ACCENT, fontSize = 13.sp)
+                Text(example.lines().take(2).joinToString(", "), color = Color(0xFF888888), fontSize = 10.sp)
+            }
         }
     }
 }
