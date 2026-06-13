@@ -10,6 +10,8 @@ import com.technoblaze.drishtistem.model.Landmark
 import com.technoblaze.drishtistem.model.MoleculeConcept
 import com.technoblaze.drishtistem.model.Subject
 import com.technoblaze.drishtistem.model.WaveConcept
+import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.sin
 
 /** Built-in offline concept library for the MVP demo. */
@@ -55,6 +57,33 @@ object ConceptRepository {
                 1f, 3f,
                 "Intersection found. The lines cross at x equals 1, y equals 3.",
                 Landmark.Kind.INTERSECTION
+            )
+        ),
+
+        GraphConcept(
+            id = "maths_cosine",
+            subject = Subject.MATHS,
+            title = "Cosine wave: y = cos(x)",
+            spokenIntro = "Cosine wave, y equals cosine of x. Like sine, it oscillates between one and minus one, but starts at its peak at x equals zero.",
+            curves = listOf(Curve("cosine of x") { cos(it) }),
+            xMin = -6.5f, xMax = 6.5f, yMin = -1.5f, yMax = 1.5f,
+            guidanceTarget = Landmark(
+                0f, 1f,
+                "Peak found. Cosine reaches its maximum of 1 at x equals 0.",
+                Landmark.Kind.PEAK
+            )
+        ),
+        GraphConcept(
+            id = "maths_absolute",
+            subject = Subject.MATHS,
+            title = "Absolute value: y = |x|",
+            spokenIntro = "Absolute value of x. A V shape: the left branch rises to the left, the right branch rises to the right. Both sides meet at the origin. The value is always zero or positive.",
+            curves = listOf(Curve("absolute value of x") { abs(it) }),
+            xMin = -5f, xMax = 5f, yMin = -0.5f, yMax = 5f,
+            guidanceTarget = Landmark(
+                0f, 0f,
+                "Corner found. The vertex of the V is at the origin, x equals zero, y equals zero.",
+                Landmark.Kind.TROUGH
             )
         ),
 
@@ -159,6 +188,38 @@ object ConceptRepository {
             structureSummary = "Sodium chloride: sodium gives one electron to chlorine, " +
                 "making a positive sodium ion and a negative chloride ion. " +
                 "Opposite charges attract: that attraction is the ionic bond."
+        ),
+        MoleculeConcept(
+            id = "chem_ammonia",
+            subject = Subject.CHEMISTRY,
+            title = "Ammonia (NH₃)",
+            spokenIntro = "Ammonia, N H 3. One nitrogen atom bonded to three hydrogen atoms arranged in a triangular pyramid shape.",
+            formulaSpoken = "N H 3",
+            atoms = listOf(
+                Atom(Element.NITROGEN, 0.50f, 0.38f, "central nitrogen atom"),
+                Atom(Element.HYDROGEN, 0.22f, 0.65f, "lower left hydrogen atom"),
+                Atom(Element.HYDROGEN, 0.78f, 0.65f, "lower right hydrogen atom"),
+                Atom(Element.HYDROGEN, 0.50f, 0.80f, "bottom hydrogen atom")
+            ),
+            bonds = listOf(Bond(0, 1), Bond(0, 2), Bond(0, 3)),
+            structureSummary = "Ammonia: one nitrogen atom single bonded to three hydrogen atoms. " +
+                "The molecule has a trigonal pyramidal shape with bond angles of about 107 degrees. " +
+                "Nitrogen has a lone pair of electrons above the three bonds."
+        ),
+        MoleculeConcept(
+            id = "chem_hcl",
+            subject = Subject.CHEMISTRY,
+            title = "Hydrogen chloride (HCl)",
+            spokenIntro = "Hydrogen chloride, H C l. The simplest acid: one hydrogen atom and one chlorine atom sharing a covalent bond.",
+            formulaSpoken = "H C l",
+            atoms = listOf(
+                Atom(Element.HYDROGEN, 0.30f, 0.50f, "hydrogen atom"),
+                Atom(Element.CHLORINE, 0.70f, 0.50f, "chlorine atom")
+            ),
+            bonds = listOf(Bond(0, 1)),
+            structureSummary = "Hydrogen chloride: one hydrogen atom bonded to one chlorine atom. " +
+                "It is a polar covalent bond: chlorine is much more electronegative and pulls the shared electrons closer, " +
+                "giving chlorine a partial negative charge and hydrogen a partial positive charge."
         )
     )
 
