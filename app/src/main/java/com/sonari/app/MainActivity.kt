@@ -64,6 +64,9 @@ class MainActivity : ComponentActivity() {
                     ) {
                         composable("tutorial") {
                             TutorialScreen(
+                                announcer = announcer,
+                                sonifier = sonifier,
+                                haptics = haptics,
                                 onFinish = { renderable ->
                                     prefs.edit().putBoolean("tutorial_done", true).apply()
                                     vm.renderable = renderable
@@ -84,7 +87,8 @@ class MainActivity : ComponentActivity() {
                                 onLoad = { renderable ->
                                     vm.renderable = renderable
                                     navController.navigate("explore")
-                                }
+                                },
+                                onTutorial = { navController.navigate("tutorial") }
                             )
                         }
                         composable("explore") {
@@ -103,7 +107,8 @@ class MainActivity : ComponentActivity() {
                         composable("settings") {
                             SettingsScreen(
                                 settings = vm.settings,
-                                onSettingsChange = { vm.settings = it }
+                                onSettingsChange = { vm.settings = it },
+                                onTutorial = { navController.navigate("tutorial") }
                             )
                         }
                     }

@@ -65,6 +65,7 @@ private val MOLECULE_FALLBACKS = listOf("water", "caffeine", "aspirin")
 @Composable
 fun HomeScreen(
     onLoad: (Renderable) -> Unit,
+    onTutorial: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var inputMode by rememberSaveable { mutableStateOf(InputMode.EQUATION) }
@@ -76,8 +77,21 @@ fun HomeScreen(
             .padding(horizontal = 20.dp, vertical = 24.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text("Sonari", color = Color.White, fontSize = 28.sp)
-        Text("Accessible STEM Explorer", color = Color(0xFF888888), fontSize = 13.sp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Sonari", color = Color.White, fontSize = 28.sp)
+                Text("Accessible STEM Explorer", color = Color(0xFF888888), fontSize = 13.sp)
+            }
+            Button(
+                onClick = onTutorial,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2C2D31)),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.semantics { contentDescription = "Open tutorial and gesture guide" }
+            ) { Text("How to use", color = ACCENT, fontSize = 12.sp) }
+        }
         Spacer(modifier = Modifier.height(20.dp))
 
         // Input mode selector.

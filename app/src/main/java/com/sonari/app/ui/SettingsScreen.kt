@@ -45,6 +45,7 @@ data class SonariSettings(
 fun SettingsScreen(
     settings: SonariSettings,
     onSettingsChange: (SonariSettings) -> Unit,
+    onTutorial: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var pitchLow by remember { mutableFloatStateOf(settings.pitchRangeLow) }
@@ -111,6 +112,17 @@ fun SettingsScreen(
             description = "Stereo pan: x-position maps to left/right channel. Best with headphones.",
             checked = stereo
         ) { stereo = it; emit() }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        SectionLabel("Help")
+        Button(
+            onClick = onTutorial,
+            colors = ButtonDefaults.buttonColors(containerColor = SECTION),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = "Open tutorial and gesture guide" }
+        ) { Text("Open tutorial & gesture guide", color = ACCENT_S) }
 
         Spacer(modifier = Modifier.height(20.dp))
         Text(
