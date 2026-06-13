@@ -5,14 +5,27 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import com.sonari.app.a11y.Announcer
 import com.sonari.app.audio.Sonifier
 import com.sonari.app.haptic.Haptics
-import com.sonari.app.model.DataPoint
-import com.sonari.app.model.Landmark
 import com.sonari.app.model.LineChart
+import com.sonari.app.model.Renderable
 import com.sonari.app.ui.ExplorerScreen
-import kotlin.math.pow
+import com.sonari.app.ui.HomeScreen
+
+// Shared between HomeScreen and ExplorerScreen via the activity's viewModelStore.
+class AppViewModel : ViewModel() {
+    var renderable: Renderable? = null
+}
 
 class MainActivity : ComponentActivity() {
 
@@ -30,12 +43,30 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface {
-                    ExplorerScreen(
-                        renderable = hardcodedParabola(),
-                        sonifier = sonifier,
-                        haptics = haptics,
-                        announcer = announcer
-                    )
+                    val navController = rememberNavController()
+                    val vm: AppViewModel = viewModel()
+
+                    NavHost(navController = navController, startDestination = "home") {
+                        composable("home") {
+                            HomeScreen(
+                                onLoad = { chart ->
+                                    vm.renderable = chart
+                                    navController.navigate("explore")
+                                }
+                            )
+                        }
+                        composable("explore") {
+                            val r = vm.renderable
+                            if (r != null) {
+                                ExplorerScreen(
+                                    renderable = r,
+                                    sonifier = sonifier,
+                                    haptics = haptics,
+                                    announcer = announcer
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -45,22 +76,5 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         sonifier.release()
         announcer.release()
-    }
-
-    private fun hardcodedParabola(): LineChart {
-        val xMin = -3.0
-        val xMax = 3.0
-        val yMin = 0.0
-        val yMax = 9.0
-        val samples = (-300..300).map { i ->
-            val x = i / 100.0
-            DataPoint(x, x.pow(2))
-        }
-        val landmarks = listOf(
-            Landmark(0.5, 0.0, Landmark.Type.EXTREMUM, "vertex, x 0, y 0"),
-            Landmark(0.0, 1.0, Landmark.Type.INTERCEPT, "left zero, x negative 3"),
-            Landmark(1.0, 1.0, Landmark.Type.INTERCEPT, "right zero, x 3")
-        )
-        return LineChart(xMin, xMax, yMin, yMax, samples, landmarks)
     }
 }
