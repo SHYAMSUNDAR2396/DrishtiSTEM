@@ -10,6 +10,7 @@ import com.technoblaze.drishtistem.model.Subject
 import org.json.JSONObject
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.sin
 
 /**
@@ -123,10 +124,14 @@ object GemmaMoleculeMapper {
     }
 
     /**
-     * Place atoms in normalised 0..1 coordinates. The highest-degree atom is the
-     * centre; its neighbours fan out (downward arc for small counts so bent and
-     * trigonal shapes read naturally, full circle for 4+). Remaining atoms are
-     * tucked beside an already-placed neighbour.
+     * Place atoms in normalised 0..1 coordinates.
+     *
+     * If the bond graph contains a ring of ≥ 4 atoms (e.g. benzene), those atoms
+     * are arranged as a regular polygon and substituents radiate outward from their
+     * ring atom. For acyclic molecules the previous centre-fan heuristic is used:
+     * the highest-degree atom sits near the centre and its neighbours fan out
+     * (downward arc for ≤3, full circle for 4+). Remaining atoms are tucked beside
+     * an already-placed neighbour.
      */
     fun layout(n: Int, bonds: List<Bond>): List<Pair<Float, Float>> {
         if (n == 1) return listOf(0.5f to 0.5f)
@@ -138,7 +143,6 @@ object GemmaMoleculeMapper {
             adj[b.fromIndex].add(b.toIndex); adj[b.toIndex].add(b.fromIndex)
         }
 
-        // No bonds: lay atoms out in a simple horizontal row.
         if (bonds.isEmpty()) {
             return (0 until n).map { i ->
                 val x = if (n == 1) 0.5f else 0.15f + 0.7f * i / (n - 1)
@@ -146,28 +150,53 @@ object GemmaMoleculeMapper {
             }
         }
 
-        val center = (0 until n).maxByOrNull { degree[it] } ?: 0
         val pos = arrayOfNulls<Pair<Float, Float>>(n)
-        pos[center] = 0.5f to 0.42f
+        val ring = findLargestRing(n, adj)
 
-        val neighbors = adj[center].distinct()
-        val radius = 0.30f
-        val count = neighbors.size
-        neighbors.forEachIndexed { idx, atom ->
-            val angle = if (count <= 3) {
-                // Downward fan between 210° and 330°.
-                val span = Math.toRadians(120.0)
-                val startA = Math.toRadians(210.0)
-                startA + if (count == 1) span / 2 else span * idx / (count - 1)
-            } else {
-                2.0 * PI * idx / count - PI / 2
+        if (ring != null && ring.size >= 4) {
+            // Arrange ring atoms as a regular polygon centred at (0.5, 0.5).
+            val ringRadius = if (ring.size <= 6) 0.27f else 0.34f
+            val ringSet = ring.toHashSet()
+            ring.forEachIndexed { i, atom ->
+                val angle = 2.0 * PI * i / ring.size - PI / 2
+                pos[atom] = (0.5f + ringRadius * cos(angle)).toFloat().coerceIn(0.08f, 0.92f) to
+                            (0.5f + ringRadius * sin(angle)).toFloat().coerceIn(0.08f, 0.92f)
             }
-            val x = (0.5f + radius * cos(angle).toFloat()).coerceIn(0.1f, 0.9f)
-            val y = (0.42f + radius * sin(angle).toFloat()).coerceIn(0.1f, 0.9f)
-            pos[atom] = x to y
+            // Substituents: point radially outward from their ring neighbour.
+            val substituteRadius = 0.18f
+            for (i in 0 until n) {
+                if (pos[i] != null) continue
+                val ringNb = adj[i].firstOrNull { it in ringSet } ?: continue
+                val (rx, ry) = pos[ringNb]!!
+                val dx = rx - 0.5f
+                val dy = ry - 0.5f
+                val len = hypot(dx, dy).coerceAtLeast(0.01f)
+                pos[i] = (rx + dx / len * substituteRadius).coerceIn(0.05f, 0.95f) to
+                         (ry + dy / len * substituteRadius).coerceIn(0.05f, 0.95f)
+            }
         }
 
-        // Any atoms not yet placed: offset from a placed neighbour, else a bottom row.
+        // Fallback / acyclic: centre-fan for any atoms not yet placed.
+        val center = (0 until n).filter { pos[it] == null }.maxByOrNull { degree[it] }
+        if (center != null) {
+            pos[center] = 0.5f to 0.42f
+            val neighbors = adj[center].distinct().filter { pos[it] == null }
+            val radius = 0.30f
+            val count = neighbors.size
+            neighbors.forEachIndexed { idx, atom ->
+                val angle = if (count <= 3) {
+                    val span = Math.toRadians(120.0)
+                    val startA = Math.toRadians(210.0)
+                    startA + if (count == 1) span / 2 else span * idx / (count - 1)
+                } else {
+                    2.0 * PI * idx / count - PI / 2
+                }
+                pos[atom] = (0.5f + radius * cos(angle).toFloat()).coerceIn(0.1f, 0.9f) to
+                            (0.42f + radius * sin(angle).toFloat()).coerceIn(0.1f, 0.9f)
+            }
+        }
+
+        // Any still-unplaced atoms: offset from a placed neighbour or a bottom row.
         var leftover = 0
         for (i in 0 until n) {
             if (pos[i] != null) continue
@@ -181,5 +210,34 @@ object GemmaMoleculeMapper {
             }
         }
         return pos.map { it!! }
+    }
+
+    /** DFS cycle search — returns atom indices of the largest simple ring, or null. */
+    private fun findLargestRing(n: Int, adj: Array<MutableList<Int>>): List<Int>? {
+        var best: List<Int>? = null
+        val visited = BooleanArray(n)
+        val path = ArrayDeque<Int>()
+        val inPath = BooleanArray(n)
+
+        fun dfs(node: Int, parent: Int) {
+            visited[node] = true
+            path.addLast(node)
+            inPath[node] = true
+            for (nb in adj[node]) {
+                if (nb == parent) continue
+                if (inPath[nb]) {
+                    val idx = path.indexOf(nb)
+                    val cycle = path.subList(idx, path.size).toList()
+                    if (best == null || cycle.size > best!!.size) best = cycle
+                } else if (!visited[nb]) {
+                    dfs(nb, node)
+                }
+            }
+            path.removeLast()
+            inPath[node] = false
+        }
+
+        for (s in 0 until n) if (!visited[s]) dfs(s, -1)
+        return best
     }
 }
