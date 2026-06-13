@@ -59,8 +59,10 @@ data class GraphConcept(
 ) : Concept {
     override val instructions: String =
         buildString {
-            append("Drag one finger across the screen to trace the graph. ")
-            append("Higher points sound higher, and steeper slopes vibrate more strongly. ")
+            append("Drag one finger to find the curve. ")
+            append("The phone vibrates only when your finger is on the line. ")
+            append("When you are off the line, short pulses quicken as you get closer, guiding you onto it. ")
+            append("Higher points on the line sound higher, and steeper parts vibrate more strongly. ")
             if (guidanceTarget != null) {
                 append("Double tap to switch guidance mode on or off. ")
                 append("In guidance mode, vibration grows stronger as you approach the intersection.")

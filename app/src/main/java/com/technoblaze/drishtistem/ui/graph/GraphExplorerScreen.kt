@@ -1,5 +1,6 @@
 package com.technoblaze.drishtistem.ui.graph
 
+import android.os.SystemClock
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -44,9 +45,16 @@ import kotlin.math.hypot
 private val CurveColors = listOf(Color(0xFF4FC3F7), Color(0xFFFFB74D), Color(0xFF81C784))
 private const val PI_HALF = (Math.PI / 2).toFloat()
 
+/** Finger within this fraction of the y-range of the curve counts as "on the line". */
+private const val ON_CURVE_TOL = 0.06f
+/** Beyond this fraction away from the line, the guidance tone goes silent. */
+private const val GUIDE_AUDIO_RANGE = 0.45f
+
 /**
- * Full-screen tactile graph canvas. Dragging snaps the finger to the nearest
- * curve: tone pitch follows y, stereo pan follows x, vibration follows slope.
+ * Full-screen tactile graph canvas. The phone vibrates continuously only while
+ * the finger is actually on the line (slope drives the strength; tone pitch
+ * follows y, stereo pan follows x). Off the line there is no constant buzz —
+ * instead short pulses quicken as the finger nears the curve, guiding it back.
  * Landmarks (roots, peaks, intersections) fire pulses and spoken callouts.
  */
 @Composable
@@ -58,6 +66,9 @@ fun GraphExplorerScreen(concept: GraphConcept, engines: Engines, onBack: () -> U
     // Landmark id -> last spoken time, to debounce repeat callouts.
     val landmarkCooldown = remember { mutableMapOf<Int, Long>() }
     var guidanceArrived by remember { mutableStateOf(false) }
+    // Last time an off-curve guidance pulse fired (uptimeMillis), in a holder so
+    // the drag lambda can mutate it without triggering recomposition.
+    val lastGuidePulse = remember { longArrayOf(0L) }
 
     LaunchedEffect(concept.id) {
         engines.speech.announce(
@@ -185,15 +196,34 @@ fun GraphExplorerScreen(concept: GraphConcept, engines: Engines, onBack: () -> U
                                     guidanceArrived = false
                                 }
                             } else {
-                                // Slope-driven feel: steeper = stronger.
-                                val dx = (concept.xMax - concept.xMin) / 200f
-                                val slope = (curve.f(worldX + dx) - y) / dx
-                                val normalized = abs(
-                                    atan(slope * (concept.xMax - concept.xMin) / (concept.yMax - concept.yMin))
-                                ) / PI_HALF
-                                engines.haptics.feel(0.15f + 0.85f * normalized)
+                                // How far the finger actually is from the curve at this x,
+                                // as a fraction of the y-range. This is the key fix: only
+                                // the line itself buzzes, not the whole canvas.
+                                val dyNorm = abs(worldYFinger - y) / (concept.yMax - concept.yMin)
 
-                                checkLandmarks(concept, worldX, y, landmarkCooldown, engines)
+                                if (dyNorm <= ON_CURVE_TOL) {
+                                    // ON the line: continuous slope-driven feel + tone + landmarks.
+                                    val dx = (concept.xMax - concept.xMin) / 200f
+                                    val slope = (curve.f(worldX + dx) - y) / dx
+                                    val normalized = abs(
+                                        atan(slope * (concept.xMax - concept.xMin) / (concept.yMax - concept.yMin))
+                                    ) / PI_HALF
+                                    engines.tone.play()
+                                    engines.haptics.feel(0.25f + 0.75f * normalized)
+                                    checkLandmarks(concept, worldX, y, landmarkCooldown, engines)
+                                } else {
+                                    // OFF the line: no continuous buzz. Guide the finger back
+                                    // with short pulses that quicken as it nears the curve, and
+                                    // an audio cue that fades in only when reasonably close.
+                                    val proximity = (1f - dyNorm).coerceIn(0f, 1f)
+                                    if (dyNorm > GUIDE_AUDIO_RANGE) engines.tone.mute() else engines.tone.play()
+                                    val interval = (450L - 380L * proximity).toLong().coerceIn(70L, 450L)
+                                    val now = SystemClock.uptimeMillis()
+                                    if (now - lastGuidePulse[0] >= interval) {
+                                        lastGuidePulse[0] = now
+                                        engines.haptics.tick()
+                                    }
+                                }
                             }
                         },
                         onDragEnd = {
