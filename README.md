@@ -145,24 +145,26 @@ flowchart LR
     G & W & M -- back --> SUB -- back --> HOME
 ```
 
-### Camera scan pipeline (Phase 1.5)
+### Camera scan pipeline (Phase 1.6 — Gemma 3n multimodal)
 
-Point the camera at a printed line graph and the **on-device vision pipeline** turns it into the same `GraphConcept` the explorer already renders. It is **pure Kotlin** — no OpenCV, no ML Kit, no model download — so the offline guarantee is untouched (the app adds only the `CAMERA` permission, never `INTERNET`). The captured image is processed in memory and never written to disk.
+Point the camera at a printed **molecular structure or line graph**, capture, and the on-device multimodal model **Gemma 3n E2B** (`gemma-3n-E2B-it-int4.litertlm`, run via MediaPipe's LLM Inference API) reads it into the same `MoleculeConcept` / `GraphConcept` the explorers already render. Gemma returns **strict JSON** (atoms + bonds, or sampled curve points); the app never sends anything off-device.
+
+Staying offline: the ~3.4 GB model is **side-loaded** to the app's storage (never bundled, never downloaded), so the app adds only the `CAMERA` permission — still **no `INTERNET`**. Captured images are processed in memory and never persisted.
 
 ```mermaid
 flowchart TD
-    CAP[📷 CameraX capture<br/>JPEG → upright Bitmap] --> DS[Downscale to 320px]
-    DS --> GRAY[Grayscale + Otsu threshold<br/>ink/paper, polarity auto-detected]
-    GRAY --> SUP[Suppress axes & grid lines<br/>rows/cols that are almost fully ink]
-    SUP --> COL[Per-column curve point<br/>= median ink row]
-    COL --> FILL[Fill gaps + moving-average smooth]
-    FILL --> NORM[Normalise into graph coords<br/>+ confidence check]
-    NORM -->|confident| CONCEPT[GraphConcept + spoken summary<br/>'rises overall, with one peak']
-    NORM -->|too little ink| RETRY[Spoken retry guidance]
-    CONCEPT --> EXPLORER[GraphExplorerScreen<br/>existing renderer]
+    CAP[📷 CameraX capture<br/>JPEG → upright Bitmap] --> DS[Downscale to 512px]
+    DS --> GEMMA[Gemma 3n E2B session<br/>vision modality + JSON prompt]
+    GEMMA --> JSON[Extract first JSON object<br/>tolerates prose / ``` fences]
+    JSON --> TYPE{type?}
+    TYPE -- molecule --> MOL[GemmaMoleculeMapper<br/>symbols → Element, 2D layout<br/>central atom centred, neighbours fan out]
+    TYPE -- graph --> GR[points → interpolating Curve]
+    TYPE -- unparseable --> RETRY[Spoken retry guidance]
+    MOL --> MS[MoleculeScreen<br/>existing renderer]
+    GR --> GE[GraphExplorerScreen<br/>existing renderer]
 ```
 
-The pipeline is covered by instrumented tests (`GraphVisionTest`) that feed it synthetic images and assert it parses an upward parabola, detects a rising line, and rejects a blank page.
+If the model file is absent, the scanner falls back to the lightweight pure-Kotlin **`GraphVision`** reader (line graphs only) so it still works offline. The JSON→concept parsing, element mapping, and 2D layout are covered by instrumented tests (`GemmaMoleculeMapperTest`); the fallback reader by `GraphVisionTest`.
 
 Every screen **announces itself** on entry (title → intro → gesture instructions), so the app is usable without TalkBack — and cleanly with it (all controls carry `contentDescription`).
 
@@ -197,27 +199,43 @@ app/src/main/java/com/technoblaze/drishtistem/
 │   ├── HapticEngine.kt              # VibrationEffect amplitude mapping, pulse/tick/patterns
 │   ├── ToneEngine.kt                # AudioTrack sine synth: pitch = y, pan = x
 │   ├── SpeechEngine.kt              # TextToSpeech queue, buffers until engine ready
-│   └── vision/GraphVision.kt        # Pure-Kotlin photo → GraphConcept pipeline (Phase 1.5)
+│   └── vision/
+│       ├── GemmaVision.kt           # Gemma 3n multimodal scanner: photo → JSON → concept
+│       ├── GemmaMoleculeMapper.kt   # JSON → MoleculeConcept/GraphConcept + 2D layout
+│       └── GraphVision.kt           # Pure-Kotlin line-graph reader (offline fallback)
 ├── model/
 │   ├── Concept.kt                   # Subject, GraphConcept (+ landmark auto-detection), WaveConcept
-│   └── Molecule.kt                  # Element (sensory signatures), Atom, Bond, MoleculeConcept
+│   └── Molecule.kt                  # Element (signatures + fromSymbol), Atom, Bond, MoleculeConcept
 ├── data/
 │   ├── ConceptRepository.kt         # The hardcoded offline concept library
-│   └── ScannedGraphStore.kt         # In-memory holder for the latest scanned graph
+│   └── ScannedConceptStore.kt       # In-memory holder for the latest scanned molecule/graph
 └── ui/
     ├── home/HomeScreen.kt           # Subject cards + Scan entry + concept lists (accessible)
     ├── graph/GraphExplorerScreen.kt # Flagship tactile graph canvas
     ├── wave/WaveLabScreen.kt        # Frequency/amplitude lab
     ├── molecule/MoleculeScreen.kt   # Tactile molecule canvas
-    └── camera/CameraScreen.kt       # CameraX capture + permission flow (Phase 1.5)
+    └── camera/CameraScreen.kt       # CameraX capture + permission flow → GemmaVision
 
 app/src/androidTest/java/com/technoblaze/drishtistem/
-└── GraphVisionTest.kt               # Synthetic-image tests for the scan pipeline
+├── GemmaMoleculeMapperTest.kt       # JSON-parsing + layout tests (no model needed)
+└── GraphVisionTest.kt               # Synthetic-image tests for the fallback reader
 ```
+
+## Scanner model setup (one-time)
+
+The Gemma 3n model is not bundled (~3.4 GB). Download `gemma-3n-E2B-it-int4.litertlm` from [google/gemma-3n-E2B-it-litert-lm](https://huggingface.co/google/gemma-3n-E2B-it-litert-lm) and push it to the app's storage:
+
+```bash
+adb shell mkdir -p /sdcard/Android/data/com.technoblaze.drishtistem/files/llm/
+adb push gemma-3n-E2B-it-int4.litertlm \
+  /sdcard/Android/data/com.technoblaze.drishtistem/files/llm/
+```
+
+A high-RAM device (8 GB+, e.g. the Snapdragon flagship in the deck) is required; the first scan loads the model and is slower. Without the file, scanning falls back to the offline line-graph reader.
 
 **Key design points**
 
-- **No network permission.** The manifest never requests INTERNET — offline is enforced by the OS, not promised by the app. The camera scanner adds only `CAMERA`, and images are processed in memory and never persisted.
+- **No network permission.** The manifest never requests INTERNET — offline is enforced by the OS, not promised by the app. The camera scanner adds only `CAMERA`; the Gemma model is side-loaded (not downloaded), and images are processed in memory and never persisted.
 - **`minSdk 26`** — the floor for `VibrationEffect` amplitude control (the core of "a rising line feels stronger"). Devices without amplitude control gracefully fall back to duration-modulated pulses.
 - **Engines outlive screens.** One `Engines` instance is created in `MainActivity.onCreate` and shared by every screen; `onPause` silences everything instantly.
 - **Landmarks are computed, not authored.** `GraphConcept` numerically scans each curve for roots, peaks, and troughs, so adding a new graph is one lambda: `Curve("my curve") { x -> ... }`.
@@ -266,7 +284,8 @@ Or open the folder in Android Studio and press **Run**.
 | Phase | Milestone | Status |
 |---|---|---|
 | 1 | STEM learning pilots: offline concept library | ✅ Built |
-| 1.5 | **Camera scan pipeline**: CameraX + on-device, pure-Kotlin vision parses printed line graphs into explorable `GraphConcept`s, reusing the explorer as renderer | ✅ Built |
+| 1.5 | **Camera scan pipeline**: CameraX + on-device, pure-Kotlin vision parses printed line graphs into explorable `GraphConcept`s | ✅ Built |
+| 1.6 | **Gemma 3n multimodal scanner**: on-device Gemma 3n E2B reads photographed molecular structures (and graphs) into explorable concepts; pure-Kotlin reader kept as offline fallback | ✅ Built |
 | 2 | Accessible e-books & diagrams | Planned |
 | 3 | Professional training modules | Planned |
 | 4 | Universal Accessibility SDK for any Android app | Planned |

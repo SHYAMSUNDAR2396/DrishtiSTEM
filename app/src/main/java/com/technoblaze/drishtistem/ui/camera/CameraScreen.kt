@@ -50,8 +50,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.technoblaze.drishtistem.core.Engines
+import com.technoblaze.drishtistem.core.vision.GemmaVision
 import com.technoblaze.drishtistem.core.vision.GraphVision
-import com.technoblaze.drishtistem.data.ScannedGraphStore
+import com.technoblaze.drishtistem.data.ScannedConceptStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -59,14 +60,16 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
 /**
- * Camera screen for Phase 1.5: point at a printed line graph, capture, and the
- * on-device [GraphVision] pipeline turns it into a [GraphConcept] that the
- * existing explorer renders. All processing is local — no image leaves the phone.
+ * Camera screen: point at a printed molecular structure or line graph, capture,
+ * and the on-device Gemma 3n model ([GemmaVision]) turns it into an explorable
+ * molecule or graph the existing explorers render. All processing is local — no
+ * image leaves the phone. If the model file is absent, falls back to the
+ * lightweight pure-Kotlin [GraphVision] for line graphs.
  */
 @Composable
 fun CameraScreen(
     engines: Engines,
-    onGraphReady: () -> Unit,
+    onScanReady: () -> Unit,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -91,13 +94,13 @@ fun CameraScreen(
     LaunchedEffect(Unit) {
         if (hasPermission) {
             engines.speech.announce(
-                "Scan a graph. Point the camera at a printed line graph so it fills the screen, " +
-                    "then press the large capture button at the bottom.",
+                "Scan a structure. Point the camera at a printed molecular structure or graph so it " +
+                    "fills the screen, then press the large capture button at the bottom.",
                 interrupt = true
             )
         } else {
             engines.speech.announce(
-                "Scan a graph needs camera access. Press grant camera access to continue.",
+                "Scanning needs camera access. Press grant camera access to continue.",
                 interrupt = true
             )
             permissionLauncher.launch(Manifest.permission.CAMERA)
@@ -117,11 +120,11 @@ fun CameraScreen(
             ) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = Color(0xFFE8C49A))
             }
-            Text("Scan a graph", color = Color(0xFFE8C49A), fontSize = 18.sp)
+            Text("Scan a structure", color = Color(0xFFE8C49A), fontSize = 18.sp)
         }
 
         if (hasPermission) {
-            CameraCapture(engines, onGraphReady)
+            CameraCapture(engines, onScanReady)
         } else {
             PermissionPrompt { permissionLauncher.launch(Manifest.permission.CAMERA) }
         }
@@ -136,7 +139,7 @@ private fun PermissionPrompt(onGrant: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            "DrishtiSTEM needs the camera to scan printed graphs. " +
+            "DrishtiSTEM needs the camera to scan printed molecules and graphs. " +
                 "The image is processed on your phone and never uploaded.",
             color = Color(0xFFBDBDBD),
             fontSize = 16.sp,
@@ -156,7 +159,7 @@ private fun PermissionPrompt(onGrant: () -> Unit) {
 }
 
 @Composable
-private fun CameraCapture(engines: Engines, onGraphReady: () -> Unit) {
+private fun CameraCapture(engines: Engines, onScanReady: () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
@@ -195,7 +198,12 @@ private fun CameraCapture(engines: Engines, onGraphReady: () -> Unit) {
             onClick = {
                 if (working) return@Button
                 working = true
-                engines.speech.announce("Capturing. Hold steady.")
+                val firstScan = !GemmaVision.engineReady
+                engines.speech.announce(
+                    if (firstScan && GemmaVision.isModelPresent(context))
+                        "Capturing. Loading the scanner model and reading the image. This can take a moment."
+                    else "Capturing. Reading the image, please wait."
+                )
                 imageCapture.takePicture(
                     ContextCompat.getMainExecutor(context),
                     object : ImageCapture.OnImageCapturedCallback() {
@@ -203,19 +211,27 @@ private fun CameraCapture(engines: Engines, onGraphReady: () -> Unit) {
                             val bitmap = image.toUprightBitmap()
                             image.close()
                             scope.launch {
-                                val result = withContext(Dispatchers.Default) {
-                                    GraphVision.analyze(bitmap)
-                                }
-                                when (result) {
-                                    is GraphVision.Result.Success -> {
-                                        ScannedGraphStore.current = result.concept
+                                when (val result = GemmaVision.analyze(context, bitmap)) {
+                                    is GemmaVision.Result.MoleculeResult -> {
+                                        ScannedConceptStore.current = result.concept
                                         engines.haptics.pulse()
-                                        engines.speech.announce(result.spokenSummary, interrupt = true)
-                                        onGraphReady()
+                                        engines.speech.announce(result.spoken, interrupt = true)
+                                        onScanReady()
                                     }
-                                    is GraphVision.Result.Failure -> {
+                                    is GemmaVision.Result.GraphResult -> {
+                                        ScannedConceptStore.current = result.concept
+                                        engines.haptics.pulse()
+                                        engines.speech.announce(result.spoken, interrupt = true)
+                                        onScanReady()
+                                    }
+                                    is GemmaVision.Result.Failure -> {
                                         engines.haptics.tick()
                                         engines.speech.announce(result.message, interrupt = true)
+                                    }
+                                    GemmaVision.Result.ModelMissing -> {
+                                        // No Gemma model installed: fall back to the
+                                        // offline line-graph reader so scanning still works.
+                                        handleModelMissingFallback(bitmap, engines, onScanReady)
                                     }
                                 }
                                 working = false
@@ -235,9 +251,37 @@ private fun CameraCapture(engines: Engines, onGraphReady: () -> Unit) {
                 .fillMaxWidth()
                 .padding(16.dp)
                 .height(76.dp)
-                .semantics { contentDescription = "Capture graph" }
+                .semantics { contentDescription = "Capture structure" }
         ) {
-            Text(if (working) "Reading graph…" else "◉  Capture graph", fontSize = 20.sp, color = Color.White)
+            Text(if (working) "Reading…" else "◉  Capture", fontSize = 20.sp, color = Color.White)
+        }
+    }
+}
+
+/**
+ * No Gemma model installed: try the lightweight offline line-graph reader so the
+ * scanner still does something useful, and otherwise point the user at setup.
+ */
+private suspend fun handleModelMissingFallback(
+    bitmap: Bitmap,
+    engines: Engines,
+    onScanReady: () -> Unit
+) {
+    val result = withContext(Dispatchers.Default) { GraphVision.analyze(bitmap) }
+    when (result) {
+        is GraphVision.Result.Success -> {
+            ScannedConceptStore.current = result.concept
+            engines.haptics.pulse()
+            engines.speech.announce(result.spokenSummary, interrupt = true)
+            onScanReady()
+        }
+        is GraphVision.Result.Failure -> {
+            engines.haptics.tick()
+            engines.speech.announce(
+                "The molecule scanner model is not installed, so I can only read line graphs right now, " +
+                    "and I could not read one. Ask your helper to install the scanner model.",
+                interrupt = true
+            )
         }
     }
 }

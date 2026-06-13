@@ -15,7 +15,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.technoblaze.drishtistem.core.Engines
 import com.technoblaze.drishtistem.data.ConceptRepository
-import com.technoblaze.drishtistem.data.ScannedGraphStore
+import com.technoblaze.drishtistem.data.ScannedConceptStore
 import com.technoblaze.drishtistem.model.GraphConcept
 import com.technoblaze.drishtistem.model.MoleculeConcept
 import com.technoblaze.drishtistem.model.Subject
@@ -82,7 +82,7 @@ private fun DrishtiNavHost(engines: Engines) {
         composable("camera") {
             CameraScreen(
                 engines = engines,
-                onGraphReady = {
+                onScanReady = {
                     // Replace the camera screen so Back returns home, not to the lens.
                     navController.navigate("scanned") {
                         popUpTo("camera") { inclusive = true }
@@ -93,8 +93,9 @@ private fun DrishtiNavHost(engines: Engines) {
         }
         composable("scanned") {
             val onBack: () -> Unit = { navController.popBackStack() }
-            when (val concept = ScannedGraphStore.current) {
+            when (val concept = ScannedConceptStore.current) {
                 is GraphConcept -> GraphExplorerScreen(concept, engines, onBack)
+                is MoleculeConcept -> MoleculeScreen(concept, engines, onBack)
                 else -> onBack()
             }
         }

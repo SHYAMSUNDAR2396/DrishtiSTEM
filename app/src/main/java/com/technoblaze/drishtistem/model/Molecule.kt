@@ -47,7 +47,52 @@ enum class Element(
         // Long-short.
         vibrationTimings = longArrayOf(0, 180, 60, 50),
         vibrationAmplitudes = intArrayOf(0, 255, 0, 160)
-    )
+    ),
+    NITROGEN(
+        "N", "Nitrogen", 7,
+        toneHz = 520f,
+        // Short-long.
+        vibrationTimings = longArrayOf(0, 50, 50, 150),
+        vibrationAmplitudes = intArrayOf(0, 170, 0, 240)
+    ),
+    SULFUR(
+        "S", "Sulfur", 16,
+        toneHz = 320f,
+        // Three rising buzzes.
+        vibrationTimings = longArrayOf(0, 70, 40, 70, 40, 120),
+        vibrationAmplitudes = intArrayOf(0, 150, 0, 200, 0, 255)
+    ),
+    PHOSPHORUS(
+        "P", "Phosphorus", 15,
+        toneHz = 360f,
+        // Long-long.
+        vibrationTimings = longArrayOf(0, 140, 60, 140),
+        vibrationAmplitudes = intArrayOf(0, 230, 0, 230)
+    ),
+    FLUORINE(
+        "F", "Fluorine", 9,
+        toneHz = 820f,
+        // Two light ticks.
+        vibrationTimings = longArrayOf(0, 35, 40, 35),
+        vibrationAmplitudes = intArrayOf(0, 150, 0, 150)
+    ),
+
+    /** Fallback for any element the library doesn't model explicitly. */
+    GENERIC(
+        "?", "atom", 0,
+        toneHz = 500f,
+        vibrationTimings = longArrayOf(0, 90),
+        vibrationAmplitudes = intArrayOf(0, 200)
+    );
+
+    companion object {
+        /** Resolve a chemical symbol (case-insensitive) to a known element, or GENERIC. */
+        fun fromSymbol(symbol: String): Element {
+            val s = symbol.trim()
+            return entries.firstOrNull { it != GENERIC && it.symbol.equals(s, ignoreCase = true) }
+                ?: GENERIC
+        }
+    }
 }
 
 /** Position in molecule-local coordinates, 0..1 on both axes. */

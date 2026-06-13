@@ -47,8 +47,16 @@ private val ElementColors = mapOf(
     Element.CARBON to Color(0xFF9AA0A6),
     Element.OXYGEN to Color(0xFFEF5350),
     Element.SODIUM to Color(0xFFAB7FD6),
-    Element.CHLORINE to Color(0xFF66BB6A)
+    Element.CHLORINE to Color(0xFF66BB6A),
+    Element.NITROGEN to Color(0xFF5C7CFA),
+    Element.SULFUR to Color(0xFFFFD43B),
+    Element.PHOSPHORUS to Color(0xFFFF922B),
+    Element.FLUORINE to Color(0xFF63E6BE),
+    Element.GENERIC to Color(0xFFB0BEC5)
 )
+
+private fun colorFor(element: Element): Color =
+    ElementColors[element] ?: Color(0xFFB0BEC5)
 
 /** What the finger is currently on: nothing, an atom, or a bond. */
 private sealed interface TouchRegion {
@@ -147,11 +155,11 @@ private fun atomScreenPos(concept: MoleculeConcept, index: Int, w: Float, h: Flo
 }
 
 private fun atomRadius(element: Element): Float = when (element) {
-    Element.HYDROGEN -> 70f
-    Element.CARBON -> 95f
+    Element.HYDROGEN, Element.FLUORINE -> 70f
+    Element.CARBON, Element.SODIUM, Element.NITROGEN -> 95f
     Element.OXYGEN -> 100f
-    Element.SODIUM -> 95f
-    Element.CHLORINE -> 110f
+    Element.CHLORINE, Element.SULFUR, Element.PHOSPHORUS -> 110f
+    Element.GENERIC -> 90f
 }
 
 private fun hitTest(concept: MoleculeConcept, pos: Offset, w: Float, h: Float): TouchRegion {
@@ -240,7 +248,7 @@ private fun DrawScope.drawMolecule(concept: MoleculeConcept, region: TouchRegion
         val center = atomScreenPos(concept, i, w, h)
         val r = atomRadius(atom.element)
         val active = region is TouchRegion.OnAtom && region.index == i
-        drawCircle(ElementColors.getValue(atom.element), radius = r, center = center)
+        drawCircle(colorFor(atom.element), radius = r, center = center)
         if (active) {
             drawCircle(Color.White, radius = r + 10f, center = center, style = Stroke(width = 6f))
         }
