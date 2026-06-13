@@ -99,6 +99,7 @@ class MainActivity : ComponentActivity() {
                                     sonifier = sonifier,
                                     haptics = haptics,
                                     announcer = announcer,
+                                    settings = vm.settings,
                                     onNavigateHome = { navController.navigate("home") },
                                     onNavigateSettings = { navController.navigate("settings") }
                                 )

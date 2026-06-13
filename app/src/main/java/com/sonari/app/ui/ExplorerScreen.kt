@@ -53,11 +53,12 @@ import com.sonari.app.audio.SweepPlayer
 import com.sonari.app.engine.Cue
 import com.sonari.app.engine.DefaultMappingEngine
 import com.sonari.app.haptic.Haptics
-import com.sonari.app.model.Atom
+import com.sonari.app.model.BarChart
 import com.sonari.app.model.Landmark
 import com.sonari.app.model.LineChart
 import com.sonari.app.model.MoleculeGraph
 import com.sonari.app.model.Renderable
+import com.sonari.app.model.ScatterChart
 import kotlin.math.hypot
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
@@ -82,10 +83,17 @@ fun ExplorerScreen(
     sonifier: Sonifier,
     haptics: Haptics,
     announcer: Announcer,
+    settings: SonariSettings = SonariSettings(),
     onNavigateHome: () -> Unit = {},
     onNavigateSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    // Apply settings to engine and sweep player every recomposition they change.
+    DefaultMappingEngine.freqLow = settings.pitchRangeLow.toDouble()
+    DefaultMappingEngine.freqHigh = settings.pitchRangeHigh.toDouble()
+    DefaultMappingEngine.panEnabled = settings.stereoPanEnabled
+
+    val sweepDurationMs = (settings.sweepDurationSec * 1000).toLong()
     val sweepPlayer = remember { SweepPlayer(sonifier, haptics, announcer) }
     var mode by remember { mutableStateOf(ExploreMode.OVERVIEW) }
 
@@ -111,8 +119,8 @@ fun ExplorerScreen(
             }
         )
         when (mode) {
-            ExploreMode.OVERVIEW -> OverviewContent(renderable, sonifier, haptics, announcer, sweepPlayer)
-            ExploreMode.EXPLORE -> ExploreContent(renderable, sonifier, haptics, announcer)
+            ExploreMode.OVERVIEW -> OverviewContent(renderable, sonifier, haptics, announcer, sweepPlayer, sweepDurationMs)
+            ExploreMode.EXPLORE -> ExploreContent(renderable, sonifier, haptics, announcer, settings.hapticIntensity)
         }
     }
 }
@@ -179,15 +187,22 @@ private fun OverviewContent(
     sonifier: Sonifier,
     haptics: Haptics,
     announcer: Announcer,
-    sweepPlayer: SweepPlayer
+    sweepPlayer: SweepPlayer,
+    sweepDurationMs: Long = 5_000L
 ) {
-    // Molecules don't have a natural sweep — show the graph and redirect to Explore.
-    if (renderable is MoleculeGraph) {
+    // Molecules, bar charts, and scatter charts don't have a meaningful time-sweep —
+    // show the static canvas and redirect to Explore.
+    val noSweepMsg = when (renderable) {
+        is MoleculeGraph -> "Switch to Explore mode to trace atoms and bonds"
+        is ScatterChart -> "Switch to Explore mode to navigate scatter points"
+        else -> null
+    }
+    if (noSweepMsg != null) {
         Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
             OverviewCanvas(renderable, 0f, Modifier.fillMaxWidth().weight(1f))
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                "Switch to Explore mode to trace atoms and bonds",
+                noSweepMsg,
                 color = Color(0xFF888888),
                 fontSize = 13.sp,
                 modifier = Modifier.padding(horizontal = 24.dp)
@@ -207,7 +222,7 @@ private fun OverviewContent(
             sweepProgress = 0f
             return@LaunchedEffect
         }
-        sweepPlayer.sweep(renderable, durationMs = 5_000L) { progress ->
+        sweepPlayer.sweep(renderable, durationMs = sweepDurationMs) { progress ->
             sweepProgress = progress
         }
         isPlaying = false
@@ -266,6 +281,8 @@ private fun OverviewCanvas(renderable: Renderable, playhead: Float, modifier: Mo
         modifier = modifier.semantics {
             contentDescription = when (renderable) {
                 is MoleculeGraph -> "Molecule graph. Use Explore mode to trace atoms and bonds."
+                is BarChart -> "Bar chart with ${renderable.bars.size} bars. Press Play to hear it."
+                is ScatterChart -> "Scatter chart with ${renderable.points.size} points. Press Play to hear it."
                 else -> "Function graph visual. Press Play to hear it."
             }
         }
@@ -273,6 +290,8 @@ private fun OverviewCanvas(renderable: Renderable, playhead: Float, modifier: Mo
         drawBackground()
         when (renderable) {
             is MoleculeGraph -> drawMolecule(renderable, null, tm)
+            is BarChart -> { drawBarChart(renderable, onFeatureIdx = -1); drawLandmarkMarkers(renderable) }
+            is ScatterChart -> { drawGrid(renderable); drawScatterChart(renderable, null); drawLandmarkMarkers(renderable) }
             else -> {
                 drawGrid(renderable)
                 drawCurve(renderable, onFeature = false)
@@ -307,12 +326,14 @@ private fun ExploreContent(
     renderable: Renderable,
     sonifier: Sonifier,
     haptics: Haptics,
-    announcer: Announcer
+    announcer: Announcer,
+    hapticIntensity: Float = 1f
 ) {
     var normPos by remember { mutableStateOf<Offset?>(null) }
     var isTouching by remember { mutableStateOf(false) }
     var lastLandmark by remember { mutableStateOf<Landmark?>(null) }
     var lastContactMs by remember { mutableLongStateOf(0L) }
+    var lastOriginEarconMs by remember { mutableLongStateOf(0L) }
 
     val cue: Cue? = remember(normPos, renderable) {
         normPos?.let { DefaultMappingEngine.cueAt(it.x.toDouble(), it.y.toDouble(), renderable) }
@@ -352,7 +373,22 @@ private fun ExploreContent(
                 .fillMaxWidth()
                 .weight(1f),
             onTouchStart = { isTouching = true; normPos = it },
-            onTouchMove = { normPos = it },
+            onTouchMove = { pos ->
+                normPos = pos
+                // Origin earcon: fire when crossing x=0 or y=0 axis.
+                val xRange = renderable.xMax - renderable.xMin
+                val yRange = renderable.yMax - renderable.yMin
+                val worldX = renderable.xMin + pos.x * xRange
+                val worldY = renderable.yMin + (1.0 - pos.y) * yRange
+                val now = System.currentTimeMillis()
+                if ((kotlin.math.abs(worldX) < xRange * 0.015 || kotlin.math.abs(worldY) < yRange * 0.015)
+                    && now - lastOriginEarconMs > 800) {
+                    lastOriginEarconMs = now
+                    haptics.contact()
+                    if (kotlin.math.abs(worldX) < xRange * 0.015) announcer.announce("x equals zero")
+                    else announcer.announce("y equals zero")
+                }
+            },
             onTouchEnd = { isTouching = false; normPos = null },
             onTwoFingerTap = { nx, ny ->
                 val nearest = renderable.landmarks.minByOrNull { lm ->
@@ -476,6 +512,18 @@ private fun ExploreCanvas(
                 drawMolecule(renderable, normPos, tm)
                 normPos?.let { drawFinger(it, cue) }
             }
+            is BarChart -> {
+                val barIdx = normPos?.let {
+                    (it.x / (1f / renderable.bars.size)).toInt().coerceIn(0, renderable.bars.size - 1)
+                } ?: -1
+                drawBarChart(renderable, onFeatureIdx = barIdx)
+                normPos?.let { drawFinger(it, cue) }
+            }
+            is ScatterChart -> {
+                drawGrid(renderable)
+                drawScatterChart(renderable, normPos)
+                normPos?.let { drawFinger(it, cue) }
+            }
             else -> {
                 drawGrid(renderable)
                 drawCurve(renderable, onFeature = cue?.onFeature == true)
@@ -582,6 +630,45 @@ private fun DrawScope.drawMolecule(
             TextStyle(color = if (nearFinger) CURVE_ACTIVE else Color.White, fontSize = 12.sp)
         )
         drawText(measured, topLeft = Offset(px - measured.size.width / 2f, py - measured.size.height / 2f))
+    }
+}
+
+private fun DrawScope.drawBarChart(r: BarChart, onFeatureIdx: Int) {
+    val count = r.bars.size
+    if (count == 0) return
+    val barWidth = size.width / count
+    val yRange = r.yMax - r.yMin
+    val zeroY = if (yRange > 0) ((1.0 - (0.0 - r.yMin) / yRange) * size.height).toFloat().coerceIn(0f, size.height)
+                else size.height
+
+    // Zero line.
+    drawLine(AXIS, Offset(0f, zeroY), Offset(size.width, zeroY), strokeWidth = 2f)
+
+    for (i in r.bars.indices) {
+        val bar = r.bars[i]
+        val normY = if (yRange > 0) ((bar.value - r.yMin) / yRange).coerceIn(0.0, 1.0) else 0.5
+        val topY = ((1.0 - normY) * size.height).toFloat()
+        val left = i * barWidth + barWidth * 0.08f
+        val right = (i + 1) * barWidth - barWidth * 0.08f
+        val color = if (i == onFeatureIdx) CURVE_ACTIVE else CURVE_IDLE.copy(alpha = 0.7f)
+        drawRect(color, Offset(left, topY), Size(right - left, zeroY - topY))
+        drawRect(if (i == onFeatureIdx) CURVE_ACTIVE else AXIS,
+            Offset(left, topY), Size(right - left, zeroY - topY),
+            style = Stroke(1.5f))
+    }
+}
+
+private fun DrawScope.drawScatterChart(r: ScatterChart, fingerNorm: Offset?) {
+    val xRange = r.xMax - r.xMin
+    val yRange = r.yMax - r.yMin
+    for (pt in r.points) {
+        val px = if (xRange > 0) ((pt.x - r.xMin) / xRange * size.width).toFloat() else size.width / 2f
+        val py = if (yRange > 0) ((1.0 - (pt.y - r.yMin) / yRange) * size.height).toFloat() else size.height / 2f
+        val ptNx = (if (xRange > 0) (pt.x - r.xMin) / xRange else 0.5).toFloat()
+        val ptNy = (if (yRange > 0) (pt.y - r.yMin) / yRange else 0.5).toFloat()
+        val near = fingerNorm != null &&
+            hypot(ptNx - fingerNorm.x, ptNy - (1f - fingerNorm.y)) < 0.08f
+        drawCircle(if (near) CURVE_ACTIVE else CURVE_IDLE, radius = if (near) 10f else 6f, center = Offset(px, py))
     }
 }
 

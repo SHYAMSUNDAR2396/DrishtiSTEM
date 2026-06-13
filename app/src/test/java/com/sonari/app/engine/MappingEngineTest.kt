@@ -1,16 +1,20 @@
 package com.sonari.app.engine
 
 import com.sonari.app.model.Atom
+import com.sonari.app.model.Bar
+import com.sonari.app.model.BarChart
 import com.sonari.app.model.Bond
 import com.sonari.app.model.DataPoint
 import com.sonari.app.model.Landmark
 import com.sonari.app.model.LineChart
 import com.sonari.app.model.MoleculeGraph
+import com.sonari.app.model.ScatterChart
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import kotlin.math.abs
 import kotlin.math.pow
@@ -42,6 +46,13 @@ class MappingEngineTest {
     }
 
     private val engine = DefaultMappingEngine
+
+    @Before
+    fun resetEngine() {
+        DefaultMappingEngine.freqLow = 200.0
+        DefaultMappingEngine.freqHigh = 1000.0
+        DefaultMappingEngine.panEnabled = true
+    }
 
     // --- Pitch bounds ---
 
@@ -191,6 +202,77 @@ class MappingEngineTest {
     fun `clamped false when y in visible range`() {
         val cue = engine.cueAt(0.5, 0.5, linearChart)
         assertFalse(cue.clamped)
+    }
+
+    // --- BarChart ---
+
+    private val simpleBarChart = BarChart(
+        yMin = 0.0, yMax = 100.0,
+        bars = listOf(Bar("A", 25.0), Bar("B", 75.0), Bar("C", 50.0)),
+        landmarks = listOf(
+            Landmark(1.0 / 6, 0.25, Landmark.Type.BAR_TOP, "A: 25.00"),
+            Landmark(3.0 / 6, 0.75, Landmark.Type.BAR_TOP, "B: 75.00"),
+            Landmark(5.0 / 6, 0.50, Landmark.Type.BAR_TOP, "C: 50.00")
+        )
+    )
+
+    @Test
+    fun `barChart pitch reflects bar value`() {
+        // Center of bar B (normX ≈ 0.5): value=75, normY=0.75
+        val expected = 200.0 * (1000.0 / 200.0).pow(0.75)
+        val cue = engine.cueAt(0.5, 0.5, simpleBarChart)
+        assertEquals(expected, cue.freqHz, 5.0)
+    }
+
+    @Test
+    fun `barChart onFeature true when finger above bar`() {
+        // Bar A goes from normX=0 to 0.333; normY=0.25; finger at normY=0.8 (above bar start y=0)
+        val cue = engine.cueAt(0.1, 0.8, simpleBarChart)
+        assertTrue(cue.onFeature)
+    }
+
+    @Test
+    fun `barChart landmark returned near bar center`() {
+        val cue = engine.cueAt(1.0 / 6, 0.5, simpleBarChart)
+        assertNotNull(cue.landmark)
+        assertTrue(cue.landmark!!.label.contains("A"))
+    }
+
+    @Test
+    fun `barChart pan is centered on bar`() {
+        // Middle of bar B (idx=1, barWidth=1/3): center normX = 0.5 → pan = 0.0
+        val cue = engine.cueAt(0.5, 0.5, simpleBarChart)
+        assertEquals(0.0, cue.pan, 0.05)
+    }
+
+    // --- ScatterChart ---
+
+    private val simpleScatter = ScatterChart(
+        xMin = 0.0, xMax = 10.0, yMin = 0.0, yMax = 10.0,
+        points = listOf(DataPoint(2.0, 3.0), DataPoint(5.0, 7.0), DataPoint(8.0, 1.0)),
+        landmarks = emptyList()
+    )
+
+    @Test
+    fun `scatterChart snaps pitch to nearest point`() {
+        // Finger near (5, 7) → normY ≈ 0.7 → freq ≈ 200*(5)^0.7
+        val expected = 200.0 * (1000.0 / 200.0).pow(0.7)
+        val cue = engine.cueAt(0.51, 0.29, simpleScatter) // normX=0.51≈5.1, normY=0.29 → world y≈7.1
+        assertEquals(expected, cue.freqHz, 15.0)
+    }
+
+    @Test
+    fun `scatterChart onFeature true near a point`() {
+        // Finger exactly at point (2,3) → normX=0.2, normY=1-(3/10)=0.7
+        val cue = engine.cueAt(0.2, 0.7, simpleScatter)
+        assertTrue(cue.onFeature)
+    }
+
+    @Test
+    fun `scatterChart onFeature false far from all points`() {
+        // normX=0.0, normY=0.0 → world (0,10); nearest is (2,3) which is far
+        val cue = engine.cueAt(0.0, 0.0, simpleScatter)
+        assertFalse(cue.onFeature)
     }
 
     @Test

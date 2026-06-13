@@ -16,7 +16,7 @@ data class Landmark(
     val type: Type,
     val label: String
 ) {
-    enum class Type { INTERCEPT, EXTREMUM, ATOM }
+    enum class Type { INTERCEPT, EXTREMUM, ATOM, BAR_TOP }
 }
 
 data class LineChart(
@@ -44,3 +44,23 @@ data class MoleculeGraph(
         Landmark(atom.normX, atom.normY, Landmark.Type.ATOM, atom.element)
     }
 }
+
+data class Bar(val category: String, val value: Double)
+
+data class BarChart(
+    override val xMin: Double = 0.0,
+    override val xMax: Double = 1.0,
+    override val yMin: Double = 0.0,
+    override val yMax: Double,
+    val bars: List<Bar>,
+    override val landmarks: List<Landmark>
+) : Renderable
+
+data class ScatterChart(
+    override val xMin: Double,
+    override val xMax: Double,
+    override val yMin: Double,
+    override val yMax: Double,
+    val points: List<DataPoint>,
+    override val landmarks: List<Landmark>
+) : Renderable
