@@ -9,12 +9,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -22,8 +24,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -33,26 +37,85 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sonari.app.data.EquationLoader
-import com.sonari.app.model.LineChart
+import com.sonari.app.data.MoleculeLoader
+import com.sonari.app.model.Renderable
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private val BG = Color(0xFF1A1B1E)
 private val ACCENT = Color(0xFF4FC3F7)
 private val FIELD_BG = Color(0xFF2C2D31)
+private val TAB_ACTIVE = Color(0xFF4FC3F7)
+private val TAB_INACTIVE = Color(0xFF2C2D31)
 private val ERROR = Color(0xFFEF5350)
 
-private val PRESETS = listOf(
+private enum class InputMode { EQUATION, MOLECULE }
+
+private val EQUATION_PRESETS = listOf(
     "x^2" to "Parabola",
-    "sin(x)" to "Sine wave",
+    "sin(x)" to "Sine",
     "x^3-3*x" to "Cubic",
     "exp(x)" to "Exponential",
     "log(x)" to "Logarithm"
 )
 
+private val MOLECULE_FALLBACKS = listOf("water", "caffeine", "aspirin")
+
 @Composable
 fun HomeScreen(
-    onLoad: (LineChart) -> Unit,
+    onLoad: (Renderable) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var inputMode by rememberSaveable { mutableStateOf(InputMode.EQUATION) }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(BG)
+            .padding(horizontal = 20.dp, vertical = 24.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Text("Sonari", color = Color.White, fontSize = 28.sp)
+        Text("Accessible STEM Explorer", color = Color(0xFF888888), fontSize = 13.sp)
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // Input mode selector.
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            InputMode.entries.forEach { m ->
+                val active = m == inputMode
+                Button(
+                    onClick = { inputMode = m },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (active) TAB_ACTIVE else TAB_INACTIVE
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .semantics { contentDescription = "${m.name.lowercase()} mode tab" }
+                ) {
+                    Text(
+                        text = m.name.lowercase().replaceFirstChar { it.uppercaseChar() },
+                        color = if (active) Color.Black else Color.White,
+                        fontSize = 14.sp
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        when (inputMode) {
+            InputMode.EQUATION -> EquationPanel(onLoad)
+            InputMode.MOLECULE -> MoleculePanel(onLoad)
+        }
+    }
+}
+
+// ─── Equation panel ───────────────────────────────────────────────────────────
+
+@Composable
+private fun EquationPanel(onLoad: (Renderable) -> Unit) {
     var equation by rememberSaveable { mutableStateOf("x^2") }
     var xMinText by rememberSaveable { mutableStateOf("-10") }
     var xMaxText by rememberSaveable { mutableStateOf("10") }
@@ -64,137 +127,187 @@ fun HomeScreen(
         val xMin = xMinText.toDoubleOrNull()
         val xMax = xMaxText.toDoubleOrNull()
         if (xMin == null || xMax == null || xMin >= xMax) {
-            errorMsg = "Domain must be two numbers with xMin < xMax"
+            errorMsg = "Domain: enter two numbers with xMin < xMax"
             return
         }
         EquationLoader.load(equation, xMin, xMax)
             .onSuccess { chart -> errorMsg = ""; onLoad(chart) }
-            .onFailure { e -> errorMsg = e.message ?: "Unknown error" }
+            .onFailure { e -> errorMsg = e.message ?: "Parse error" }
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(BG)
-            .padding(horizontal = 20.dp, vertical = 24.dp)
-    ) {
-        Text("Sonari", color = Color.White, fontSize = 28.sp)
-        Text("Accessible STEM Explorer", color = Color(0xFF888888), fontSize = 14.sp)
+    Text("Equation  (use x as the variable)", color = Color(0xFFCCCCCC), fontSize = 13.sp)
+    Spacer(modifier = Modifier.height(6.dp))
 
-        Spacer(modifier = Modifier.height(28.dp))
+    OutlinedTextField(
+        value = equation,
+        onValueChange = { equation = it; errorMsg = "" },
+        singleLine = true,
+        placeholder = { Text("e.g.  x^2  or  sin(x)", color = Color(0xFF555555)) },
+        colors = fieldColors(),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+        keyboardActions = KeyboardActions(onGo = { tryLoad() }),
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = "Equation input" }
+    )
 
-        Text("Equation  (use x as the variable)", color = Color(0xFFCCCCCC), fontSize = 13.sp)
+    if (errorMsg.isNotEmpty()) {
         Spacer(modifier = Modifier.height(6.dp))
+        Text(errorMsg, color = ERROR, fontSize = 12.sp)
+    }
 
+    Spacer(modifier = Modifier.height(14.dp))
+    Text("Domain", color = Color(0xFFCCCCCC), fontSize = 13.sp)
+    Spacer(modifier = Modifier.height(6.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         OutlinedTextField(
-            value = equation,
-            onValueChange = { equation = it; errorMsg = "" },
+            value = xMinText,
+            onValueChange = { xMinText = it; errorMsg = "" },
             singleLine = true,
-            placeholder = { Text("e.g.  x^2  or  sin(x)", color = Color(0xFF555555)) },
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                focusedContainerColor = FIELD_BG,
-                unfocusedContainerColor = FIELD_BG,
-                focusedBorderColor = ACCENT,
-                unfocusedBorderColor = Color(0xFF4A4B50)
-            ),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-            keyboardActions = KeyboardActions(onGo = { tryLoad() }),
+            label = { Text("x min", color = Color(0xFF888888), fontSize = 12.sp) },
+            colors = fieldColors(),
             modifier = Modifier
-                .fillMaxWidth()
-                .semantics { contentDescription = "Equation input. Type a math expression using x." }
+                .weight(1f)
+                .semantics { contentDescription = "x minimum input" }
         )
+        OutlinedTextField(
+            value = xMaxText,
+            onValueChange = { xMaxText = it; errorMsg = "" },
+            singleLine = true,
+            label = { Text("x max", color = Color(0xFF888888), fontSize = 12.sp) },
+            colors = fieldColors(),
+            modifier = Modifier
+                .weight(1f)
+                .semantics { contentDescription = "x maximum input" }
+        )
+    }
 
-        if (errorMsg.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(errorMsg, color = ERROR, fontSize = 12.sp)
+    Spacer(modifier = Modifier.height(18.dp))
+
+    Button(
+        onClick = ::tryLoad,
+        colors = ButtonDefaults.buttonColors(containerColor = ACCENT),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .semantics { contentDescription = "Explore equation" }
+    ) { Text("Explore", color = Color.Black, fontSize = 17.sp) }
+
+    Spacer(modifier = Modifier.height(24.dp))
+    Text("Quick examples", color = Color(0xFF888888), fontSize = 12.sp)
+    Spacer(modifier = Modifier.height(8.dp))
+
+    EQUATION_PRESETS.chunked(2).forEach { pair ->
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            pair.forEach { (expr, label) ->
+                Button(
+                    onClick = { equation = expr; errorMsg = "" },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2C2D31)),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .semantics { contentDescription = "$label: $expr" }
+                ) {
+                    Column {
+                        Text(expr, color = ACCENT, fontSize = 13.sp)
+                        Text(label, color = Color(0xFF888888), fontSize = 10.sp)
+                    }
+                }
+            }
+            if (pair.size == 1) Spacer(modifier = Modifier.weight(1f))
         }
+        Spacer(modifier = Modifier.height(8.dp))
+    }
+}
 
-        Spacer(modifier = Modifier.height(16.dp))
+// ─── Molecule panel ───────────────────────────────────────────────────────────
 
-        // Domain row.
-        Text("Domain", color = Color(0xFFCCCCCC), fontSize = 13.sp)
+@Composable
+private fun MoleculePanel(onLoad: (Renderable) -> Unit) {
+    var name by rememberSaveable { mutableStateOf("") }
+    var errorMsg by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val keyboard = LocalSoftwareKeyboardController.current
+
+    fun search(query: String) {
+        if (query.isBlank()) { errorMsg = "Enter a molecule name"; return }
+        keyboard?.hide()
+        loading = true; errorMsg = ""
+        scope.launch {
+            val result = withContext(Dispatchers.IO) { MoleculeLoader.load(query) }
+            loading = false
+            result
+                .onSuccess { mol -> onLoad(mol) }
+                .onFailure { e -> errorMsg = e.message ?: "Not found" }
+        }
+    }
+
+    Text("Molecule name", color = Color(0xFFCCCCCC), fontSize = 13.sp)
+    Spacer(modifier = Modifier.height(6.dp))
+
+    OutlinedTextField(
+        value = name,
+        onValueChange = { name = it; errorMsg = "" },
+        singleLine = true,
+        placeholder = { Text("e.g.  caffeine  or  aspirin", color = Color(0xFF555555)) },
+        colors = fieldColors(),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = { search(name) }),
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = "Molecule name input" }
+    )
+
+    if (errorMsg.isNotEmpty()) {
         Spacer(modifier = Modifier.height(6.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            DomainField(
-                label = "x min",
-                value = xMinText,
-                onChange = { xMinText = it; errorMsg = "" },
-                modifier = Modifier.weight(1f)
-            )
-            DomainField(
-                label = "x max",
-                value = xMaxText,
-                onChange = { xMaxText = it; errorMsg = "" },
-                modifier = Modifier.weight(1f)
-            )
+        Text(errorMsg, color = ERROR, fontSize = 12.sp)
+    }
+
+    Spacer(modifier = Modifier.height(14.dp))
+
+    if (loading) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            CircularProgressIndicator(color = ACCENT)
         }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Explore button.
+    } else {
         Button(
-            onClick = ::tryLoad,
+            onClick = { search(name) },
             colors = ButtonDefaults.buttonColors(containerColor = ACCENT),
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp)
-                .semantics { contentDescription = "Explore equation button" }
+                .semantics { contentDescription = "Search molecule on PubChem" }
+        ) { Text("Search PubChem", color = Color.Black, fontSize = 17.sp) }
+    }
+
+    Spacer(modifier = Modifier.height(24.dp))
+    Text("Offline examples (always available)", color = Color(0xFF888888), fontSize = 12.sp)
+    Spacer(modifier = Modifier.height(8.dp))
+
+    MOLECULE_FALLBACKS.forEach { mol ->
+        Button(
+            onClick = { search(mol) },
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2C2D31)),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp)
+                .semantics { contentDescription = "$mol molecule preset" }
         ) {
-            Text("Explore", color = Color.Black, fontSize = 17.sp)
-        }
-
-        Spacer(modifier = Modifier.height(28.dp))
-
-        Text("Quick examples", color = Color(0xFF888888), fontSize = 12.sp)
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 2×3 preset grid.
-        PRESETS.chunked(2).forEach { pair ->
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                pair.forEach { (expr, label) ->
-                    Button(
-                        onClick = { equation = expr; errorMsg = "" },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2C2D31)),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .semantics { contentDescription = "$label preset: $expr" }
-                    ) {
-                        Column {
-                            Text(expr, color = ACCENT, fontSize = 13.sp)
-                            Text(label, color = Color(0xFF888888), fontSize = 10.sp)
-                        }
-                    }
-                }
-                // Pad last row if odd number of presets.
-                if (pair.size == 1) Spacer(modifier = Modifier.weight(1f))
-            }
-            Spacer(modifier = Modifier.height(8.dp))
+            Text(mol.replaceFirstChar { it.uppercaseChar() }, color = ACCENT, fontSize = 14.sp)
         }
     }
 }
 
 @Composable
-private fun DomainField(label: String, value: String, onChange: (String) -> Unit, modifier: Modifier) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onChange,
-        singleLine = true,
-        label = { Text(label, color = Color(0xFF888888), fontSize = 12.sp) },
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedTextColor = Color.White,
-            unfocusedTextColor = Color.White,
-            focusedContainerColor = FIELD_BG,
-            unfocusedContainerColor = FIELD_BG,
-            focusedBorderColor = ACCENT,
-            unfocusedBorderColor = Color(0xFF4A4B50)
-        ),
-        modifier = modifier.semantics { contentDescription = "$label domain input" }
-    )
-}
+private fun fieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = Color.White,
+    unfocusedTextColor = Color.White,
+    focusedContainerColor = FIELD_BG,
+    unfocusedContainerColor = FIELD_BG,
+    focusedBorderColor = ACCENT,
+    unfocusedBorderColor = Color(0xFF4A4B50)
+)

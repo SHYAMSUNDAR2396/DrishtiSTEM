@@ -42,6 +42,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sonari.app.a11y.Announcer
@@ -50,9 +53,12 @@ import com.sonari.app.audio.SweepPlayer
 import com.sonari.app.engine.Cue
 import com.sonari.app.engine.DefaultMappingEngine
 import com.sonari.app.haptic.Haptics
+import com.sonari.app.model.Atom
 import com.sonari.app.model.Landmark
 import com.sonari.app.model.LineChart
+import com.sonari.app.model.MoleculeGraph
 import com.sonari.app.model.Renderable
+import kotlin.math.hypot
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 
@@ -161,6 +167,22 @@ private fun OverviewContent(
     announcer: Announcer,
     sweepPlayer: SweepPlayer
 ) {
+    // Molecules don't have a natural sweep — show the graph and redirect to Explore.
+    if (renderable is MoleculeGraph) {
+        Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+            OverviewCanvas(renderable, 0f, Modifier.fillMaxWidth().weight(1f))
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                "Switch to Explore mode to trace atoms and bonds",
+                color = Color(0xFF888888),
+                fontSize = 13.sp,
+                modifier = Modifier.padding(horizontal = 24.dp)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+        return
+    }
+
     var isPlaying by remember { mutableStateOf(false) }
     var sweepProgress by remember { mutableFloatStateOf(0f) }
 
@@ -225,18 +247,25 @@ private fun OverviewContent(
 
 @Composable
 private fun OverviewCanvas(renderable: Renderable, playhead: Float, modifier: Modifier) {
+    val tm = rememberTextMeasurer()
     Canvas(
         modifier = modifier.semantics {
-            contentDescription = "Function graph visual. Press Play to hear it."
+            contentDescription = when (renderable) {
+                is MoleculeGraph -> "Molecule graph. Use Explore mode to trace atoms and bonds."
+                else -> "Function graph visual. Press Play to hear it."
+            }
         }
     ) {
         drawBackground()
-        drawGrid(renderable)
-        drawCurve(renderable, onFeature = false)
-        if (playhead > 0f) {
-            drawPlayhead(playhead)
+        when (renderable) {
+            is MoleculeGraph -> drawMolecule(renderable, null, tm)
+            else -> {
+                drawGrid(renderable)
+                drawCurve(renderable, onFeature = false)
+                if (playhead > 0f) drawPlayhead(playhead)
+                drawLandmarkMarkers(renderable)
+            }
         }
-        drawLandmarkMarkers(renderable)
     }
 }
 
@@ -299,7 +328,7 @@ private fun ExploreContent(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        ExploreStatusBar(cue, isTouching)
+        ExploreStatusBar(cue, isTouching, renderable)
 
         ExploreCanvas(
             renderable = renderable,
@@ -333,11 +362,13 @@ private fun ExploreContent(
 }
 
 @Composable
-private fun ExploreStatusBar(cue: Cue?, isTouching: Boolean) {
+private fun ExploreStatusBar(cue: Cue?, isTouching: Boolean, renderable: Renderable? = null) {
+    val isMolecule = renderable is MoleculeGraph
     val text = when {
-        !isTouching -> "Lift off"
+        !isTouching -> if (isMolecule) "Drag to trace atoms and bonds" else "Lift off"
+        cue?.onFeature == true && isMolecule -> "On atom/bond · %.0f Hz".format(cue.freqHz)
         cue?.onFeature == true -> "On curve · %.0f Hz".format(cue.freqHz)
-        cue != null -> "Off curve · %.0f Hz".format(cue.freqHz)
+        cue != null -> "Off · %.0f Hz".format(cue.freqHz)
         else -> ""
     }
     Text(
@@ -360,6 +391,7 @@ private fun ExploreCanvas(
     onTwoFingerTap: (normX: Float, normY: Float) -> Unit,
     onDoubleTap: (normX: Float, normY: Float) -> Unit
 ) {
+    val tm = rememberTextMeasurer()
     Canvas(
         modifier = modifier
             .semantics {
@@ -425,9 +457,17 @@ private fun ExploreCanvas(
             }
     ) {
         drawBackground()
-        drawGrid(renderable)
-        drawCurve(renderable, onFeature = cue?.onFeature == true)
-        normPos?.let { drawFinger(it, cue) }
+        when (renderable) {
+            is MoleculeGraph -> {
+                drawMolecule(renderable, normPos, tm)
+                normPos?.let { drawFinger(it, cue) }
+            }
+            else -> {
+                drawGrid(renderable)
+                drawCurve(renderable, onFeature = cue?.onFeature == true)
+                normPos?.let { drawFinger(it, cue) }
+            }
+        }
     }
 }
 
@@ -492,6 +532,43 @@ private fun DrawScope.drawFinger(normPos: Offset, cue: Cue?) {
         drawCircle(CURVE_ACTIVE.copy(alpha = 0.2f), 36f, Offset(cx, cy))
     }
     drawCircle(FINGER_DOT, 14f, Offset(cx, cy))
+}
+
+private fun DrawScope.drawMolecule(
+    r: MoleculeGraph,
+    fingerNorm: Offset?,
+    tm: androidx.compose.ui.text.TextMeasurer
+) {
+    // Bonds drawn first (underneath atoms).
+    for (bond in r.bonds) {
+        if (bond.fromIndex >= r.atoms.size || bond.toIndex >= r.atoms.size) continue
+        val a = r.atoms[bond.fromIndex]; val b = r.atoms[bond.toIndex]
+        val ax = a.normX.toFloat() * size.width; val ay = a.normY.toFloat() * size.height
+        val bx = b.normX.toFloat() * size.width; val by = b.normY.toFloat() * size.height
+        drawLine(CURVE_IDLE, Offset(ax, ay), Offset(bx, by), strokeWidth = 4f, cap = StrokeCap.Round)
+        if (bond.order >= 2) {
+            val dx = (by - ay); val dy = -(bx - ax)
+            val len = hypot(dx, dy).coerceAtLeast(1f)
+            val offX = dx / len * 6f; val offY = dy / len * 6f
+            drawLine(CURVE_IDLE, Offset(ax + offX, ay + offY), Offset(bx + offX, by + offY), 4f)
+        }
+    }
+    // Atoms with element labels.
+    for (atom in r.atoms) {
+        val px = atom.normX.toFloat() * size.width
+        val py = atom.normY.toFloat() * size.height
+        val nearFinger = fingerNorm != null &&
+            hypot((px / size.width - fingerNorm.x), (py / size.height - fingerNorm.y)) < 0.08f
+        val bg = if (nearFinger) CURVE_ACTIVE.copy(alpha = 0.3f) else Color(0xFF2A2B2E)
+        drawCircle(bg, radius = 22f, center = Offset(px, py))
+        drawCircle(if (nearFinger) CURVE_ACTIVE else AXIS, radius = 22f, center = Offset(px, py),
+            style = Stroke(2f))
+        val measured = tm.measure(
+            atom.element,
+            TextStyle(color = if (nearFinger) CURVE_ACTIVE else Color.White, fontSize = 12.sp)
+        )
+        drawText(measured, topLeft = Offset(px - measured.size.width / 2f, py - measured.size.height / 2f))
+    }
 }
 
 private fun niceStep(rough: Double): Double {
