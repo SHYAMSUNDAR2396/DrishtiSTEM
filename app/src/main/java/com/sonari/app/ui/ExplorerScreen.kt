@@ -310,11 +310,21 @@ private fun ExploreContent(
                 .weight(1f),
             onTouchStart = { isTouching = true; normPos = it },
             onTouchMove = { normPos = it },
-            onTouchEnd = { isTouching = false; normPos = null }
+            onTouchEnd = { isTouching = false; normPos = null },
+            onTwoFingerTap = { nx, ny ->
+                announcer.coordinates(nx.toDouble(), ny.toDouble(), renderable)
+            },
+            onDoubleTap = { nx, ny ->
+                val nearest = renderable.landmarks.minByOrNull { lm ->
+                    Math.hypot(nx - lm.normX, ny - lm.normY)
+                }
+                if (nearest != null) announcer.landmark(nearest)
+                else announcer.announce("no landmarks")
+            }
         )
 
         Text(
-            text = "Drag to explore · Two-finger tap = speak coordinates",
+            text = "Drag · Two-finger tap = coordinates · Double-tap = nearest landmark",
             color = Color(0xFF555555),
             fontSize = 11.sp,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
@@ -346,37 +356,71 @@ private fun ExploreCanvas(
     modifier: Modifier,
     onTouchStart: (Offset) -> Unit,
     onTouchMove: (Offset) -> Unit,
-    onTouchEnd: () -> Unit
+    onTouchEnd: () -> Unit,
+    onTwoFingerTap: (normX: Float, normY: Float) -> Unit,
+    onDoubleTap: (normX: Float, normY: Float) -> Unit
 ) {
     Canvas(
         modifier = modifier
             .semantics {
                 contentDescription =
                     "Interactive function canvas. Drag to hear the shape. " +
-                    "Buzzes when on the curve."
+                    "Two-finger tap speaks coordinates. Double-tap speaks nearest landmark."
             }
             .pointerInput(renderable) {
+                // lastTapMs/lastTapNorm persist across gestures (vars outside awaitEachGesture).
+                var lastTapMs = 0L
+                var lastTapNorm = Offset.Zero
+
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
-                    down.consume()
-                    onTouchStart(
-                        Offset(
-                            (down.position.x / size.width).coerceIn(0f, 1f),
-                            (down.position.y / size.height).coerceIn(0f, 1f)
-                        )
+                    val downMs = System.currentTimeMillis()
+                    val downNorm = Offset(
+                        (down.position.x / size.width).coerceIn(0f, 1f),
+                        (down.position.y / size.height).coerceIn(0f, 1f)
                     )
+                    val isDoubleTap = downMs - lastTapMs < 300 &&
+                        (downNorm - lastTapNorm).getDistance() < 0.15f
+
+                    down.consume()
+                    onTouchStart(downNorm)
+
+                    var twoFingers = false
+                    var dragged = false
+
                     while (true) {
                         val event = awaitPointerEvent()
-                        val primary = event.changes.firstOrNull { it.pressed } ?: break
+
+                        // Detect second finger joining.
+                        if (event.changes.count { it.pressed } >= 2) twoFingers = true
+
+                        val primary = event.changes.firstOrNull { it.pressed }
+                        if (primary == null) {
+                            // All fingers lifted — classify the gesture.
+                            val upMs = System.currentTimeMillis()
+                            val isTap = upMs - downMs < 250 && !dragged
+                            when {
+                                twoFingers && isTap ->
+                                    onTwoFingerTap(downNorm.x, downNorm.y)
+                                !twoFingers && isTap && isDoubleTap ->
+                                    onDoubleTap(downNorm.x, downNorm.y)
+                                !twoFingers && isTap -> {
+                                    lastTapMs = upMs
+                                    lastTapNorm = downNorm
+                                }
+                            }
+                            onTouchEnd()
+                            break
+                        }
+
                         primary.consume()
-                        onTouchMove(
-                            Offset(
-                                (primary.position.x / size.width).coerceIn(0f, 1f),
-                                (primary.position.y / size.height).coerceIn(0f, 1f)
-                            )
+                        val norm = Offset(
+                            (primary.position.x / size.width).coerceIn(0f, 1f),
+                            (primary.position.y / size.height).coerceIn(0f, 1f)
                         )
+                        if ((norm - downNorm).getDistance() > 0.02f) dragged = true
+                        onTouchMove(norm)
                     }
-                    onTouchEnd()
                 }
             }
     ) {
