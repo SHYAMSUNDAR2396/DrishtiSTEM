@@ -4,6 +4,8 @@
     <!-- Offline by design: no INTERNET permission. Images come from the system
          photo picker, which needs no storage permission. -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Voice "find the point" hook; recognition prefers on-device. No INTERNET. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
         android:allowBackup="true"

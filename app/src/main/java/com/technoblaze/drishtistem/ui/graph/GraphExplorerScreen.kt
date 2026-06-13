@@ -1,20 +1,30 @@
 package com.technoblaze.drishtistem.ui.graph
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
 import android.os.SystemClock
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -31,11 +41,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.technoblaze.drishtistem.core.Engines
+import com.technoblaze.drishtistem.core.VoiceCommand
 import com.technoblaze.drishtistem.model.GraphConcept
 import com.technoblaze.drishtistem.model.Landmark
 import kotlin.math.abs
@@ -69,6 +82,44 @@ fun GraphExplorerScreen(concept: GraphConcept, engines: Engines, onBack: () -> U
     // Last time an off-curve guidance pulse fired (uptimeMillis), in a holder so
     // the drag lambda can mutate it without triggering recomposition.
     val lastGuidePulse = remember { longArrayOf(0L) }
+
+    val context = LocalContext.current
+    // The point "Find key point" / voice guidance homes toward: the concept's
+    // declared target, else the most salient detected landmark.
+    val keyPoint = remember(concept.id) { resolveKeyPoint(concept) }
+    var guideTarget by remember(concept.id) { mutableStateOf(concept.guidanceTarget) }
+
+    fun startGuidance() {
+        val target = keyPoint ?: return
+        guideTarget = target
+        guidanceMode = true
+        guidanceArrived = false
+        engines.speech.announce(
+            "Finding the key point. Drag your finger across the screen; the buzzing gets " +
+                "stronger as you get closer.",
+            interrupt = true
+        )
+    }
+
+    val micPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) listenForGuide(context, engines, ::startGuidance)
+        else engines.speech.announce(
+            "Microphone permission denied. Use the find key point button instead.", interrupt = true
+        )
+    }
+
+    fun onVoiceTap() {
+        if (keyPoint == null) return
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            listenForGuide(context, engines, ::startGuidance)
+        } else {
+            micPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
 
     LaunchedEffect(concept.id) {
         engines.speech.announce(
@@ -108,6 +159,32 @@ fun GraphExplorerScreen(concept: GraphConcept, engines: Engines, onBack: () -> U
                         color = Color(0xFF9E9E9E),
                         fontSize = 13.sp
                     )
+                }
+            }
+        }
+
+        if (keyPoint != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Button(
+                    onClick = { startGuidance() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB5651D)),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(54.dp)
+                        .semantics { contentDescription = "Find the key point and guide me to it" }
+                ) {
+                    Text("🎯 Find key point", color = Color.White, fontSize = 15.sp)
+                }
+                OutlinedButton(
+                    onClick = { onVoiceTap() },
+                    modifier = Modifier
+                        .height(54.dp)
+                        .semantics { contentDescription = "Ask by voice to find the key point" }
+                ) {
+                    Text("🎤 Voice", color = Color(0xFFE8C49A), fontSize = 15.sp)
                 }
             }
         }
@@ -179,7 +256,7 @@ fun GraphExplorerScreen(concept: GraphConcept, engines: Engines, onBack: () -> U
                                 (worldX - concept.xMin) / (concept.xMax - concept.xMin)
                             )
 
-                            val target = concept.guidanceTarget
+                            val target = guideTarget
                             if (guidanceMode && target != null) {
                                 // GPS-style homing: stronger vibration closer to the target.
                                 val dist = hypot(
@@ -272,6 +349,40 @@ fun GraphExplorerScreen(concept: GraphConcept, engines: Engines, onBack: () -> U
                     drawCircle(Color(0x40FFFFFF), radius = 44f, center = it)
                 }
             }
+        }
+    }
+}
+
+/** The point the "find key point" guidance homes to: declared target, else the
+ *  most salient detected landmark (intersection > peak/trough > anything). */
+private fun resolveKeyPoint(concept: GraphConcept): Landmark? {
+    concept.guidanceTarget?.let { return it }
+    val lms = concept.landmarks
+    return lms.firstOrNull { it.kind == Landmark.Kind.INTERSECTION }
+        ?: lms.firstOrNull { it.kind == Landmark.Kind.PEAK || it.kind == Landmark.Kind.TROUGH }
+        ?: lms.firstOrNull()
+}
+
+/** Capture one voice command; on a "find the point" intent, start guidance.
+ *  Always degrades gracefully to the on-screen button. */
+private fun listenForGuide(context: Context, engines: Engines, onGuide: () -> Unit) {
+    engines.speech.stopSpeaking()
+    if (!VoiceCommand.isAvailable(context)) {
+        engines.speech.announce(
+            "Voice is not available on this device. Use the find key point button.", interrupt = true
+        )
+        return
+    }
+    engines.speech.announce("Listening. Say, find the point.", interrupt = true)
+    VoiceCommand.listenOnce(context) { text ->
+        when {
+            text != null && VoiceCommand.isGuideIntent(text) -> onGuide()
+            text != null -> engines.speech.announce(
+                "I heard $text. Say find the point, or use the button.", interrupt = true
+            )
+            else -> engines.speech.announce(
+                "I did not catch that. Use the find key point button.", interrupt = true
+            )
         }
     }
 }

@@ -97,8 +97,12 @@ class ToneEngine {
         while (running) {
             val freq = frequency
             val phaseStep = 2.0 * PI * freq / SAMPLE_RATE
-            val leftGain = (1f - pan).coerceIn(0.12f, 1f)
-            val rightGain = pan.coerceIn(0.12f, 1f)
+            // Equal-power (constant-loudness) panning for a pronounced binaural
+            // left→right sweep: at the extremes one ear goes almost silent, so
+            // horizontal position is unmistakable while tracing.
+            val theta = pan * (PI.toFloat() / 2f)
+            val leftGain = kotlin.math.cos(theta)
+            val rightGain = kotlin.math.sin(theta)
 
             for (i in 0 until frames) {
                 // ~6 ms attack/release at 44.1 kHz keeps transitions click-free.
