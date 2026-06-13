@@ -19,5 +19,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "DrishtiSTEM"
+rootProject.name = "Sonari"
 include(":app")

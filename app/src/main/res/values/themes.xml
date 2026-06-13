@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.DrishtiSTEM" parent="android:Theme.Material.NoActionBar">
+    <style name="Theme.Sonari" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">#1A1B1E</item>
         <item name="android:statusBarColor">#1A1B1E</item>
     </style>
