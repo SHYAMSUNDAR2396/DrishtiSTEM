@@ -26,9 +26,9 @@ object GemmaVision {
     const val MODEL_FILENAME = "gemma-3n-E2B-it-int4.litertlm"
 
     private const val PROMPT = """You help blind students explore science. Look at the image.
-If it is a molecular structure, reply with ONLY this JSON:
-{"type":"molecule","name":"<name>","atoms":[{"element":"O"},{"element":"H"}],"bonds":[{"from":0,"to":1,"order":1}]}
-List every atom; "element" is the chemical symbol. Index atoms from 0 in listing order. "order" is the bond order 1, 2 or 3.
+If it is a molecular structure, reply with ONLY this JSON (list EVERY atom individually — CH4 has 1 carbon and 4 hydrogens = 5 entries):
+{"type":"molecule","name":"methane","atoms":[{"element":"C"},{"element":"H"},{"element":"H"},{"element":"H"},{"element":"H"}],"bonds":[{"from":0,"to":1,"order":1},{"from":0,"to":2,"order":1},{"from":0,"to":3,"order":1},{"from":0,"to":4,"order":1}]}
+List every atom; "element" is the chemical symbol. Index atoms from 0 in listing order. "order" is bond order 1, 2 or 3.
 If it is a line graph or function plot, reply with ONLY this JSON:
 {"type":"graph","points":[<15 to 25 numbers between 0 and 10 sampling the curve height from left to right>]}
 Reply with JSON only. No prose, no markdown fences."""
@@ -59,7 +59,7 @@ Reply with JSON only. No prose, no markdown fences."""
             engine ?: run {
                 val options = LlmInference.LlmInferenceOptions.builder()
                     .setModelPath(modelFile(context).absolutePath)
-                    .setMaxTokens(1024)
+                    .setMaxTokens(2048)
                     .setMaxNumImages(1)
                     .build()
                 LlmInference.createFromOptions(context, options).also { engine = it }
