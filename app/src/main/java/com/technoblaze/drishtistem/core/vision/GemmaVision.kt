@@ -14,7 +14,7 @@ import java.io.File
 
 /**
  * On-device multimodal scanner backed by Gemma 3n E2B (int4 .litertlm) via the
- * MediaPipe LLM Inference API. A captured photo plus a strict-JSON prompt yields
+ * MediaPipe LLM Inference API. An uploaded photo plus a strict-JSON prompt yields
  * either a molecular structure or a line graph, which [GemmaMoleculeMapper]
  * converts into the app's existing explorable concepts.
  *

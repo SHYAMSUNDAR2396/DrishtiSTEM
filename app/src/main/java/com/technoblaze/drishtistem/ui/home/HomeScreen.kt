@@ -43,7 +43,7 @@ fun HomeScreen(engines: Engines, onSubject: (Subject) -> Unit, onScan: () -> Uni
         engines.speech.announce(
             "Welcome to Drishti STEM. Turning visual STEM into touch and sound. " +
                 "Choose a subject: Mathematics, Physics, or Chemistry. " +
-                "Or use scan a molecule or graph to capture a printed structure with the camera.",
+                "Or use upload a molecule or graph to read a photo of a printed structure.",
             interrupt = true
         )
     }
@@ -96,7 +96,7 @@ fun HomeScreen(engines: Engines, onSubject: (Subject) -> Unit, onScan: () -> Uni
             }
         }
 
-        // Phase 1.5: capture a printed graph with the camera and explore it.
+        // Upload a photo of a printed structure and explore it by touch.
         Card(
             onClick = {
                 engines.haptics.tick()
@@ -108,16 +108,16 @@ fun HomeScreen(engines: Engines, onSubject: (Subject) -> Unit, onScan: () -> Uni
                 .height(96.dp)
                 .semantics {
                     contentDescription =
-                        "Scan a structure. Capture a printed molecule or graph with the camera and explore it by touch. Double tap to open."
+                        "Upload a structure. Choose a photo of a molecule or graph and explore it by touch. Double tap to open."
                 }
         ) {
             Column(
                 modifier = Modifier.fillMaxSize().padding(20.dp),
                 verticalArrangement = Arrangement.Center
             ) {
-                Text("📷  Scan a molecule or graph", color = Color(0xFFE8C49A), fontSize = 22.sp)
+                Text("🖼  Upload a molecule or graph", color = Color(0xFFE8C49A), fontSize = 22.sp)
                 Text(
-                    "Capture a printed structure with the camera",
+                    "Read a photo of a printed structure",
                     color = Color(0xFFBDBDBD),
                     fontSize = 14.sp
                 )

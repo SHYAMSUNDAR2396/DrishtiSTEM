@@ -20,7 +20,7 @@ import com.technoblaze.drishtistem.model.GraphConcept
 import com.technoblaze.drishtistem.model.MoleculeConcept
 import com.technoblaze.drishtistem.model.Subject
 import com.technoblaze.drishtistem.model.WaveConcept
-import com.technoblaze.drishtistem.ui.camera.CameraScreen
+import com.technoblaze.drishtistem.ui.scan.ScanScreen
 import com.technoblaze.drishtistem.ui.graph.GraphExplorerScreen
 import com.technoblaze.drishtistem.ui.home.HomeScreen
 import com.technoblaze.drishtistem.ui.home.SubjectScreen
@@ -76,16 +76,16 @@ private fun DrishtiNavHost(engines: Engines) {
             HomeScreen(
                 engines = engines,
                 onSubject = { subject -> navController.navigate("subject/${subject.name}") },
-                onScan = { navController.navigate("camera") }
+                onScan = { navController.navigate("scan") }
             )
         }
-        composable("camera") {
-            CameraScreen(
+        composable("scan") {
+            ScanScreen(
                 engines = engines,
                 onScanReady = {
-                    // Replace the camera screen so Back returns home, not to the lens.
+                    // Replace the upload screen so Back returns home, not to the picker.
                     navController.navigate("scanned") {
-                        popUpTo("camera") { inclusive = true }
+                        popUpTo("scan") { inclusive = true }
                     }
                 },
                 onBack = { navController.popBackStack() }
