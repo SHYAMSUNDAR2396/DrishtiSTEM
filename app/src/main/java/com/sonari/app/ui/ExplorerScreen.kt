@@ -355,19 +355,19 @@ private fun ExploreContent(
             onTouchMove = { normPos = it },
             onTouchEnd = { isTouching = false; normPos = null },
             onTwoFingerTap = { nx, ny ->
-                announcer.coordinates(nx.toDouble(), ny.toDouble(), renderable)
-            },
-            onDoubleTap = { nx, ny ->
                 val nearest = renderable.landmarks.minByOrNull { lm ->
                     Math.hypot(nx - lm.normX, ny - lm.normY)
                 }
                 if (nearest != null) announcer.landmark(nearest)
                 else announcer.announce("no landmarks")
+            },
+            onDoubleTap = { nx, ny ->
+                announcer.coordinates(nx.toDouble(), ny.toDouble(), renderable)
             }
         )
 
         Text(
-            text = "Drag · Two-finger tap = coordinates · Double-tap = nearest landmark",
+            text = "Drag · Two-finger tap = nearest landmark · Double-tap = coordinates",
             color = Color(0xFF555555),
             fontSize = 11.sp,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)

@@ -121,17 +121,17 @@ private val STEPS = listOf(
     Step(
         title = "Gesture: two-finger tap",
         body = "Place two fingers on the screen and lift them quickly. " +
-               "The app will speak your exact coordinates: x and y values in real units. " +
-               "Use this whenever you want to know exactly where you are.",
-        hint = "Try it below. Tap with two fingers and listen for the spoken coordinates.",
+               "The app speaks the nearest landmark: an intercept, a peak, or a valley. " +
+               "Use this to identify key points without knowing their exact position.",
+        hint = "Try it below. Tap with two fingers and listen for the landmark name.",
         practice = Practice.TWO_FINGER_TAP
     ),
     Step(
         title = "Gesture: double-tap",
         body = "Tap the screen twice quickly in the same spot. " +
-               "The app speaks the nearest landmark: an intercept, a peak, or a valley. " +
-               "Use this to identify key points without knowing their exact position.",
-        hint = "Try it below. Double-tap and listen for the landmark name.",
+               "The app will speak your exact coordinates: x and y values in real units. " +
+               "Use this whenever you want to know exactly where you are.",
+        hint = "Try it below. Double-tap and listen for the spoken coordinates.",
         practice = Practice.DOUBLE_TAP
     ),
     Step(
@@ -449,12 +449,6 @@ private fun PracticeCanvas(
 
                                 when {
                                     twoFingers && isTap && practice == Practice.TWO_FINGER_TAP -> {
-                                        val x = r.xMin + downNorm.x * (r.xMax - r.xMin)
-                                        val y = r.yMin + downNorm.y * (r.yMax - r.yMin)
-                                        announcer.announce("x %.2f, y %.2f".format(x, y))
-                                        haptics.landmark()
-                                    }
-                                    !twoFingers && isTap && isDouble && practice == Practice.DOUBLE_TAP -> {
                                         val nearest = r.landmarks.minByOrNull { lm ->
                                             Math.hypot(downNorm.x - lm.normX, downNorm.y - lm.normY)
                                         }
@@ -462,6 +456,12 @@ private fun PracticeCanvas(
                                             announcer.landmark(nearest)
                                             haptics.landmark()
                                         }
+                                    }
+                                    !twoFingers && isTap && isDouble && practice == Practice.DOUBLE_TAP -> {
+                                        val x = r.xMin + downNorm.x * (r.xMax - r.xMin)
+                                        val y = r.yMin + downNorm.y * (r.yMax - r.yMin)
+                                        announcer.announce("x %.2f, y %.2f".format(x, y))
+                                        haptics.landmark()
                                     }
                                     !twoFingers && isTap -> {
                                         lastDownMs = upMs
