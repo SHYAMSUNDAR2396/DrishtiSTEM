@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.technoblaze.drishtistem"
+    namespace = "com.sonari.app"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.technoblaze.drishtistem"
+        applicationId = "com.sonari.app"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -49,13 +49,11 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.navigation.compose)
-    implementation(libs.androidx.camera.core)
-    implementation(libs.androidx.camera.camera2)
-    implementation(libs.androidx.camera.lifecycle)
-    implementation(libs.androidx.camera.view)
-    implementation(libs.mediapipe.tasks.genai)
-    implementation(libs.mediapipe.tasks.vision)
+    implementation(libs.exp4j)
+    implementation(libs.okhttp)
+    implementation(libs.kotlinx.coroutines.android)
 
+    testImplementation(libs.junit4)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
 }

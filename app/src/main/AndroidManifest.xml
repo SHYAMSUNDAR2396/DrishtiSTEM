@@ -1,19 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Offline by design: no INTERNET permission. -->
     <uses-permission android:name="android.permission.VIBRATE" />
-    <!-- Camera is used only for on-device graph scanning; images never leave the phone. -->
-    <uses-permission android:name="android.permission.CAMERA" />
-    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
-        android:largeHeap="true"
         android:supportsRtl="true"
-        android:theme="@style/Theme.DrishtiSTEM">
+        android:theme="@style/Theme.Sonari">
         <activity
             android:name=".MainActivity"
             android:exported="true"
