@@ -164,7 +164,7 @@ flowchart TD
     GR --> GE[GraphExplorerScreen<br/>existing renderer]
 ```
 
-If the model file is absent, the scanner falls back to the lightweight pure-Kotlin **`GraphVision`** reader (line graphs only) so it still works offline. The JSON→concept parsing, element mapping, and 2D layout are covered by instrumented tests (`GemmaMoleculeMapperTest`); the fallback reader by `GraphVisionTest`.
+If the model file is absent, the scanner says so and asks for it to be installed. The JSON→concept parsing, element mapping, and 2D layout are covered by instrumented tests (`GemmaMoleculeMapperTest`).
 
 Every screen **announces itself** on entry (title → intro → gesture instructions), so the app is usable without TalkBack — and cleanly with it (all controls carry `contentDescription`).
 
@@ -201,8 +201,7 @@ app/src/main/java/com/technoblaze/drishtistem/
 │   ├── SpeechEngine.kt              # TextToSpeech queue, buffers until engine ready
 │   └── vision/
 │       ├── GemmaVision.kt           # Gemma 3n multimodal scanner: photo → JSON → concept
-│       ├── GemmaMoleculeMapper.kt   # JSON → MoleculeConcept/GraphConcept + 2D layout
-│       └── GraphVision.kt           # Pure-Kotlin line-graph reader (offline fallback)
+│       └── GemmaMoleculeMapper.kt   # JSON → MoleculeConcept/GraphConcept + 2D layout
 ├── model/
 │   ├── Concept.kt                   # Subject, GraphConcept (+ landmark auto-detection), WaveConcept
 │   └── Molecule.kt                  # Element (signatures + fromSymbol), Atom, Bond, MoleculeConcept
@@ -217,8 +216,7 @@ app/src/main/java/com/technoblaze/drishtistem/
     └── camera/CameraScreen.kt       # CameraX capture + permission flow → GemmaVision
 
 app/src/androidTest/java/com/technoblaze/drishtistem/
-├── GemmaMoleculeMapperTest.kt       # JSON-parsing + layout tests (no model needed)
-└── GraphVisionTest.kt               # Synthetic-image tests for the fallback reader
+└── GemmaMoleculeMapperTest.kt       # JSON-parsing + layout tests (no model needed)
 ```
 
 ## Scanner model setup (one-time)
@@ -231,7 +229,7 @@ adb push gemma-3n-E2B-it-int4.litertlm \
   /sdcard/Android/data/com.technoblaze.drishtistem/files/llm/
 ```
 
-A high-RAM device (8 GB+, e.g. the Snapdragon flagship in the deck) is required; the first scan loads the model and is slower. Without the file, scanning falls back to the offline line-graph reader.
+A high-RAM device (8 GB+, e.g. the Snapdragon flagship in the deck) is required; the first scan loads the model and is slower. Without the file, the scanner asks for the model to be installed.
 
 **Key design points**
 
@@ -285,7 +283,7 @@ Or open the folder in Android Studio and press **Run**.
 |---|---|---|
 | 1 | STEM learning pilots: offline concept library | ✅ Built |
 | 1.5 | **Camera scan pipeline**: CameraX + on-device, pure-Kotlin vision parses printed line graphs into explorable `GraphConcept`s | ✅ Built |
-| 1.6 | **Gemma 3n multimodal scanner**: on-device Gemma 3n E2B reads photographed molecular structures (and graphs) into explorable concepts; pure-Kotlin reader kept as offline fallback | ✅ Built |
+| 1.6 | **Gemma 3n multimodal scanner**: on-device Gemma 3n E2B reads photographed molecular structures (and graphs) into explorable concepts | ✅ Built |
 | 2 | Accessible e-books & diagrams | Planned |
 | 3 | Professional training modules | Planned |
 | 4 | Universal Accessibility SDK for any Android app | Planned |

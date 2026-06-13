@@ -51,11 +51,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.technoblaze.drishtistem.core.Engines
 import com.technoblaze.drishtistem.core.vision.GemmaVision
-import com.technoblaze.drishtistem.core.vision.GraphVision
 import com.technoblaze.drishtistem.data.ScannedConceptStore
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
@@ -63,8 +60,7 @@ import kotlin.coroutines.suspendCoroutine
  * Camera screen: point at a printed molecular structure or line graph, capture,
  * and the on-device Gemma 3n model ([GemmaVision]) turns it into an explorable
  * molecule or graph the existing explorers render. All processing is local — no
- * image leaves the phone. If the model file is absent, falls back to the
- * lightweight pure-Kotlin [GraphVision] for line graphs.
+ * image leaves the phone.
  */
 @Composable
 fun CameraScreen(
@@ -229,9 +225,12 @@ private fun CameraCapture(engines: Engines, onScanReady: () -> Unit) {
                                         engines.speech.announce(result.message, interrupt = true)
                                     }
                                     GemmaVision.Result.ModelMissing -> {
-                                        // No Gemma model installed: fall back to the
-                                        // offline line-graph reader so scanning still works.
-                                        handleModelMissingFallback(bitmap, engines, onScanReady)
+                                        engines.haptics.tick()
+                                        engines.speech.announce(
+                                            "The scanner model is not installed on this device. " +
+                                                "Ask your helper to install it, then try again.",
+                                            interrupt = true
+                                        )
                                     }
                                 }
                                 working = false
@@ -254,34 +253,6 @@ private fun CameraCapture(engines: Engines, onScanReady: () -> Unit) {
                 .semantics { contentDescription = "Capture structure" }
         ) {
             Text(if (working) "Reading…" else "◉  Capture", fontSize = 20.sp, color = Color.White)
-        }
-    }
-}
-
-/**
- * No Gemma model installed: try the lightweight offline line-graph reader so the
- * scanner still does something useful, and otherwise point the user at setup.
- */
-private suspend fun handleModelMissingFallback(
-    bitmap: Bitmap,
-    engines: Engines,
-    onScanReady: () -> Unit
-) {
-    val result = withContext(Dispatchers.Default) { GraphVision.analyze(bitmap) }
-    when (result) {
-        is GraphVision.Result.Success -> {
-            ScannedConceptStore.current = result.concept
-            engines.haptics.pulse()
-            engines.speech.announce(result.spokenSummary, interrupt = true)
-            onScanReady()
-        }
-        is GraphVision.Result.Failure -> {
-            engines.haptics.tick()
-            engines.speech.announce(
-                "The molecule scanner model is not installed, so I can only read line graphs right now, " +
-                    "and I could not read one. Ask your helper to install the scanner model.",
-                interrupt = true
-            )
         }
     }
 }
