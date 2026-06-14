@@ -362,15 +362,19 @@ private fun ExploreContent(
             if (ta != null && ta != lastTouchedAtom) {
                 haptics.atomSignature(ta)
                 announcer.speakAtom(ta)
+                kotlinx.coroutines.delay(150)
+                if (isTouching) haptics.feel()
             }
             lastTouchedAtom = ta
         }
 
-        LaunchedEffect(cue?.touchedBond, isTouching, cue?.onFeature) {
-            val tb = if (isTouching && cue?.onFeature == true) cue?.touchedBond else null
+        LaunchedEffect(cue?.touchedBond, cue?.touchedAtom, isTouching, cue?.onFeature) {
+            val tb = if (isTouching && cue?.onFeature == true && cue?.touchedAtom == null) cue?.touchedBond else null
             if (tb != null && tb != lastTouchedBond) {
                 haptics.bondSignature(tb)
                 announcer.speakBond(tb)
+                kotlinx.coroutines.delay(150)
+                if (isTouching) haptics.feel()
             }
             lastTouchedBond = tb
         }

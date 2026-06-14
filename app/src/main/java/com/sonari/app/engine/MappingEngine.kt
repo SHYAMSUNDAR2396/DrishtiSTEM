@@ -29,7 +29,7 @@ object DefaultMappingEngine : MappingEngine {
     private const val FREQ_LOW = 200.0
     private const val FREQ_HIGH = 1000.0
     private const val FEATURE_TOL = 0.04
-    private const val ATOM_TOL = 0.17
+    private const val ATOM_TOL = 0.08
     private const val BOND_TOL = 0.04
     private const val LANDMARK_TOL = 0.03
 
@@ -61,18 +61,16 @@ object DefaultMappingEngine : MappingEngine {
         val onAtom = nearestAtomIdx != null &&
             hypot(nx - r.atoms[nearestAtomIdx].normX, ny - r.atoms[nearestAtomIdx].normY) < ATOM_TOL
 
-        val nearestBond = if (!onAtom) {
-            r.bonds.minByOrNull { b ->
-                val ax = r.atoms[b.fromIndex].normX; val ay = r.atoms[b.fromIndex].normY
-                val bx = r.atoms[b.toIndex].normX; val by = r.atoms[b.toIndex].normY
-                pointToSegDist(nx, ny, ax, ay, bx, by)
-            }.takeIf { b ->
-                if (b == null) return@takeIf false
-                val ax = r.atoms[b.fromIndex].normX; val ay = r.atoms[b.fromIndex].normY
-                val bx = r.atoms[b.toIndex].normX; val by = r.atoms[b.toIndex].normY
-                pointToSegDist(nx, ny, ax, ay, bx, by) < BOND_TOL
-            }
-        } else null
+        val nearestBond = r.bonds.minByOrNull { b ->
+            val ax = r.atoms[b.fromIndex].normX; val ay = r.atoms[b.fromIndex].normY
+            val bx = r.atoms[b.toIndex].normX; val by = r.atoms[b.toIndex].normY
+            pointToSegDist(nx, ny, ax, ay, bx, by)
+        }.takeIf { b ->
+            if (b == null) return@takeIf false
+            val ax = r.atoms[b.fromIndex].normX; val ay = r.atoms[b.fromIndex].normY
+            val bx = r.atoms[b.toIndex].normX; val by = r.atoms[b.toIndex].normY
+            pointToSegDist(nx, ny, ax, ay, bx, by) < BOND_TOL
+        }
 
         val featureY = if (onAtom) {
             r.atoms[nearestAtomIdx!!].normY

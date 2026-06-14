@@ -58,11 +58,7 @@ object MoleculeLoader {
     }
 
     private fun parseRecord(json: JSONObject): MoleculeGraph {
-        val structure = json
-            .getJSONObject("PC_Compounds")
-            .also { /* note: PC_Compounds is actually an array */ }
-
-        // PC_Compounds is a JSON array in PubChem format.
+        // PC_Compounds is a JSON array in PubChem record format.
         val compound = try {
             json.getJSONArray("PC_Compounds").getJSONObject(0)
         } catch (e: Exception) {
@@ -148,12 +144,26 @@ object MoleculeLoader {
     )
 
     private fun caffeine() = MoleculeGraph(
+        // Purine ring system (fused pyrimidine + imidazole)
+        // 6-ring: C0-N1-C2-N3-C4-N5-C0 (clockwise)
+        // 5-ring: N5-C6-N7-C8-C9-N1 (fused, extending above the 6-ring)
+        // Substituents: 2 carbonyls (O10,O11), 3 methyls (C12,C13,C14)
         atoms = listOf(
-            Atom("C", 0.50, 0.35), Atom("N", 0.63, 0.26), Atom("C", 0.77, 0.35),
-            Atom("N", 0.77, 0.50), Atom("C", 0.63, 0.59), Atom("N", 0.50, 0.50),
-            Atom("C", 0.37, 0.59), Atom("N", 0.23, 0.50), Atom("C", 0.23, 0.35),
-            Atom("C", 0.37, 0.26), Atom("O", 0.63, 0.74), Atom("O", 0.50, 0.20),
-            Atom("C", 0.91, 0.26), Atom("C", 0.63, 0.10), Atom("C", 0.09, 0.59)
+            Atom("C", 0.50, 0.37), // 0: C0 — 6-ring, carbonyl (C=O11), bonds to N1 & N5
+            Atom("N", 0.66, 0.46), // 1: N1 — 6-ring, methyl C13, bonds to C0, C2, C9
+            Atom("C", 0.66, 0.64), // 2: C2 — 6-ring, methyl C12, bonds to N1, N3
+            Atom("N", 0.50, 0.73), // 3: N3 — 6-ring, bonds to C2, C4
+            Atom("C", 0.34, 0.64), // 4: C4 — 6-ring, carbonyl C=O10, bonds to N3, N5
+            Atom("N", 0.34, 0.46), // 5: N5 — 6-ring/5-ring bridge, bonds to C4, C0, C6
+            Atom("C", 0.34, 0.30), // 6: C6 — 5-ring imidazole, bonds to N5, N7
+            Atom("N", 0.42, 0.20), // 7: N7 — 5-ring imidazole, methyl C14, bonds to C6, C8
+            Atom("C", 0.55, 0.23), // 8: C8 — 5-ring imidazole, bonds to N7, C9
+            Atom("C", 0.66, 0.33), // 9: C9 — 5-ring imidazole, bonds to C8, N1
+            Atom("O", 0.34, 0.78), // 10: O10 — carbonyl double-bond to C4
+            Atom("O", 0.50, 0.23), // 11: O11 — carbonyl double-bond to C0
+            Atom("C", 0.82, 0.64), // 12: C12 — methyl on C2
+            Atom("C", 0.78, 0.40), // 13: C13 — methyl on N1
+            Atom("C", 0.42, 0.05)  // 14: C14 — methyl on N7
         ),
         bonds = listOf(
             Bond(0, 1), Bond(1, 2), Bond(2, 3), Bond(3, 4), Bond(4, 5),
@@ -164,12 +174,23 @@ object MoleculeLoader {
     )
 
     private fun aspirin() = MoleculeGraph(
+        // Benzene ring (C0-C1-C3-C5-C4-C2-C0) with acetyloxy at C0 and carboxyl at C3
+        // Ring order: 0→1→3→5→4→2→0 (not sequential — follows actual bond connectivity)
         atoms = listOf(
-            Atom("C", 0.50, 0.50), Atom("C", 0.63, 0.41), Atom("C", 0.63, 0.59),
-            Atom("C", 0.77, 0.41), Atom("C", 0.77, 0.59), Atom("C", 0.50, 0.66),
-            Atom("C", 0.37, 0.59), Atom("O", 0.37, 0.41), Atom("C", 0.23, 0.41),
-            Atom("O", 0.23, 0.59), Atom("O", 0.10, 0.35), Atom("C", 0.91, 0.35),
-            Atom("O", 0.91, 0.20), Atom("O", 0.78, 0.26)
+            Atom("C", 0.50, 0.35), // 0: C0 — ring pos 1, acetyloxy C6 attached
+            Atom("C", 0.67, 0.45), // 1: C1 — ring pos 2
+            Atom("C", 0.33, 0.45), // 2: C2 — ring pos 6
+            Atom("C", 0.67, 0.65), // 3: C3 — ring pos 3, carboxyl C11 attached
+            Atom("C", 0.33, 0.65), // 4: C4 — ring pos 5
+            Atom("C", 0.50, 0.75), // 5: C5 — ring pos 4
+            Atom("C", 0.50, 0.19), // 6: C6 — acetyloxy benzylic carbon
+            Atom("O", 0.38, 0.12), // 7: O7 — acetyloxy ether bridge
+            Atom("C", 0.25, 0.19), // 8: C8 — acetyl carbonyl carbon
+            Atom("O", 0.25, 0.32), // 9: O9 — acetyl carbonyl oxygen (double)
+            Atom("O", 0.12, 0.15), // 10: O10 — acetyl oxygen/methyl
+            Atom("C", 0.84, 0.65), // 11: C11 — carboxyl carbon
+            Atom("O", 0.84, 0.78), // 12: O12 — carboxyl carbonyl oxygen (double)
+            Atom("O", 0.98, 0.60)  // 13: O13 — carboxyl hydroxyl
         ),
         bonds = listOf(
             Bond(0, 1), Bond(0, 2), Bond(1, 3), Bond(2, 4), Bond(3, 5),
