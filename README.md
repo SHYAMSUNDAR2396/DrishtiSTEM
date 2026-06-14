@@ -1,298 +1,130 @@
-# DrishtiSTEM 👁️🤚🔊
+# DrishtiSTEM (Sonari)
 
-**Turning Visual STEM Into Touch and Sound**
+An Android accessibility app that turns STEM visuals into sound, vibration, and speech so users can explore equations and molecules without relying on vision.
 
-> *"Not a screen reader. A sensory learning platform."*
+> Current app/package naming in code is **Sonari** (`com.sonari.app`).
 
-DrishtiSTEM is a fully **offline Android app** that turns graphs, equations, waves, and molecules into **haptic vibration and spatial audio**, so blind and visually impaired students can explore physics, chemistry, and mathematics independently — no human reader, no internet, no costly Braille hardware.
+## Project analysis (current state)
 
-Built by **Team TechnoBlaze** for the **iQOO Hackathon, Bangalore**.
+This repository is a **single-module Android app** (`:app`) built with:
 
----
+- Kotlin + Jetpack Compose
+- Android SDK 35 / minSdk 26
+- exp4j (equation parsing)
+- OkHttp (PubChem fetch)
+- MediaPipe GenAI (`tasks-genai`) for optional on-device Gemma voice command parsing
 
-## The Problem
+### What the app currently does
 
-STEM education is heavily visual — graphs, diagrams, equations, and spatial relationships dominate the learning experience.
+1. **Equation mode**
+   - Users enter expressions like `x^2` or `sin(x)` with a custom domain.
+   - The app samples the curve and auto-detects landmarks (intercepts, local extrema).
+   - In Explore mode, finger position maps to:
+     - pitch (vertical position)
+     - stereo pan (horizontal position)
+     - vibration (contact/feature feedback)
 
-- **6+ crore** visually impaired people in India
-- STEM content remains highly visual and spatial
-- Braille STEM tools are **costly and specialist**
-- Screen readers are **poor for graphs & formulas**
+2. **Molecule mode**
+   - Queries PubChem for molecule graph data (atoms + bonds).
+   - Includes offline fallbacks: `water`, `caffeine`, `aspirin`.
+   - Different haptic patterns are used for atom types and bond orders.
 
-> Accessibility should not determine educational opportunity.
+3. **Accessibility and guidance**
+   - Text-to-speech announces landmarks, coordinates, molecule summaries, atoms, and bonds.
+   - Tutorial flow explains gestures and interaction model.
+   - Voice button supports speech recognition and command parsing.
 
-## The Solution
+4. **Voice command parsing**
+   - Baseline regex parser handles commands such as:
+     - load molecule
+     - load equation
+     - navigate home/back
+     - open tutorial/settings
+   - Optional Gemma 3n local model support (`GemmaVoiceBrain`) for smarter parsing if the model file is available.
 
-The phone screen becomes a **tactile canvas**. As a finger explores:
+5. **Deterministic CV pipeline (in repo)**
+   - `core/vision/cv` contains image preprocessing + curve extraction + curve normalization classes.
+   - Instrumentation tests exist for this pipeline.
+   - This is present in codebase but separate from the main Home → Explore UI flow.
 
-| Sensory channel | Encodes | Example |
-|---|---|---|
-| 🎵 Tone **pitch** | Height (y-value) | A rising curve sounds higher and higher |
-| 🎧 Stereo **pan** | Horizontal position (x) | Left of the graph plays in the left ear |
-| 📳 Vibration **amplitude** | Slope / feature strength | A steep climb feels strong, a flat line feels calm |
-| 🗣️ **Speech** (TTS) | Landmarks & context | "Peak at x = 2", "Oxygen. Central oxygen atom." |
-| 🧭 **Guidance mode** | Proximity to a target | Vibration grows stronger as you home in on an intersection — like GPS for graphs |
+## Architecture overview
 
-Everything runs **100% on-device**: airplane mode is the demo condition, not a limitation.
+- `MainActivity` hosts a Compose `NavHost` (`tutorial`, `home`, `explore`, `settings`) and shared engines.
+- Core runtime components:
+  - `Sonifier` (continuous stereo audio synthesis)
+  - `Haptics` (tiered vibration behavior by device capability)
+  - `Announcer` (TTS output)
+  - `DefaultMappingEngine` (maps touch position + renderable data into cues)
 
----
+### Navigation flow
 
-## Architecture
+- First launch: Tutorial (unless completed flag is set in SharedPreferences)
+- Then Home:
+  - Equation tab → generates a `LineChart`
+  - Molecule tab → loads a `MoleculeGraph`
+- Explore screen supports:
+  - Overview mode (auto sweep for charts)
+  - Explore mode (touch-driven exploration)
 
-### System overview
+## Repository structure
 
-```mermaid
-flowchart LR
-    subgraph Input
-        T[👆 Touch input<br/>drag / double-tap]
-    end
-
-    subgraph App["DrishtiSTEM (single-activity Compose app)"]
-        NAV[Navigation<br/>MainActivity + NavHost]
-        REPO[(ConceptRepository<br/>offline concept library)]
-        subgraph Screens
-            HOME[HomeScreen<br/>SubjectScreen]
-            GRAPH[GraphExplorerScreen<br/>maths + physics graphs]
-            WAVE[WaveLabScreen<br/>adjustable sine wave]
-            MOL[MoleculeScreen<br/>tactile molecules]
-        end
-        subgraph Engines["Sensory engines (core/)"]
-            HAP[HapticEngine]
-            TONE[ToneEngine]
-            SPEECH[SpeechEngine]
-        end
-    end
-
-    subgraph Output
-        V[📳 Vibration motor]
-        A[🎧 Stereo audio]
-        S[🗣️ Voice]
-    end
-
-    T --> Screens
-    NAV --> Screens
-    REPO --> Screens
-    GRAPH & WAVE & MOL & HOME --> HAP & TONE & SPEECH
-    HAP --> V
-    TONE --> A
-    SPEECH --> S
-```
-
-### The sensory pipeline (per touch event)
-
-What happens ~120 times per second while a finger traces a graph:
-
-```mermaid
-flowchart TD
-    DRAG[Touch drag event] --> MAP[GraphMapper<br/>screen px → world coords]
-    MAP --> SNAP[Snap finger x to nearest curve<br/>y = f x]
-    SNAP --> PITCH[ToneEngine.setPitchFromValue<br/>y → 200–1200 Hz log scale]
-    SNAP --> PAN[ToneEngine.setPan<br/>x → stereo left/right]
-    SNAP --> MODE{Guidance<br/>mode?}
-    MODE -- off --> SLOPE[Numeric slope dy/dx<br/>→ HapticEngine.feel<br/>steeper = stronger]
-    MODE -- on --> DIST[Distance to target<br/>→ HapticEngine.feel<br/>closer = stronger]
-    SNAP --> LM{Near a<br/>landmark?}
-    LM -- "root" --> TICK[haptic tick + announce]
-    LM -- "peak / trough / intersection" --> PULSE[haptic pulse + announce]
-    DIST -- "arrived" --> FOUND[pulse + 'Intersection found:<br/>x = 1, y = 3']
-```
-
-### Audio synthesis
-
-```mermaid
-flowchart LR
-    UI[UI thread<br/>touch events] -- "volatile writes:<br/>frequency, pan, volume" --> LOOP[ToneEngine thread]
-    LOOP --> GEN[Sine generator<br/>phase-continuous,<br/>per-sample volume smoothing<br/>= click-free]
-    GEN --> TRACK[AudioTrack<br/>44.1 kHz stereo PCM<br/>USAGE_ASSISTANCE_SONIFICATION]
-    TRACK --> EARS[🎧 Left/right gain = spatial pan]
-```
-
-### Chemistry: region state machine
-
-The molecule canvas tracks *what the finger is on*; feedback fires on **transitions**, so resting still is quiet:
-
-```mermaid
-stateDiagram-v2
-    [*] --> None
-    None --> OnAtom: finger enters atom circle
-    None --> OnBond: finger nears bond line
-    OnAtom --> OnBond: slide along bond
-    OnBond --> OnAtom: reach bonded atom
-    OnAtom --> None: leave atom
-    OnBond --> None: leave bond
-    note right of OnAtom
-        Element vibration signature
-        (H = tick, C = double pulse, O = long buzz)
-        + element tone + spoken name & role
-    end note
-    note right of OnBond
-        Light continuous buzz
-        + averaged tone
-        + "single bond between Oxygen and Hydrogen"
-    end note
-```
-
-### Screen navigation
-
-```mermaid
-flowchart LR
-    HOME[Home<br/>3 subject cards + Upload] --> SUB[Subject screen<br/>concept list]
-    HOME --> UP[Upload image]
-    SUB --> G[Graph Explorer]
-    SUB --> W[Wave Lab]
-    SUB --> M[Molecule Explorer]
-    UP --> G
-    UP --> M
-    G & W & M -- back --> SUB -- back --> HOME
-```
-
-### Image upload pipeline (Phase 1.6 — Gemma 3n multimodal)
-
-Pick a photo of a **molecular structure or line graph** from the device (via the system photo picker), and the on-device multimodal model **Gemma 3n E2B** (`gemma-3n-E2B-it-int4.litertlm`, run via MediaPipe's LLM Inference API) reads it into the same `MoleculeConcept` / `GraphConcept` the explorers already render. Gemma returns **strict JSON** (atoms + bonds, or sampled curve points); the app never sends anything off-device.
-
-Staying offline: the ~3.4 GB model is **side-loaded** to the app's storage (never bundled, never downloaded). Images come from the Android photo picker, so the app needs **no camera and no storage permission** — and still **no `INTERNET`**. The chosen image is processed in memory and never persisted.
-
-```mermaid
-flowchart TD
-    CAP[🖼 Photo picker<br/>URI → software Bitmap] --> DS[Downscale to 512px]
-    DS --> GEMMA[Gemma 3n E2B session<br/>vision modality + JSON prompt]
-    GEMMA --> JSON[Extract first JSON object<br/>tolerates prose / ``` fences]
-    JSON --> TYPE{type?}
-    TYPE -- molecule --> MOL[GemmaMoleculeMapper<br/>symbols → Element, 2D layout<br/>central atom centred, neighbours fan out]
-    TYPE -- graph --> GR[points → interpolating Curve]
-    TYPE -- unparseable --> RETRY[Spoken retry guidance]
-    MOL --> MS[MoleculeScreen<br/>existing renderer]
-    GR --> GE[GraphExplorerScreen<br/>existing renderer]
-```
-
-If the model file is absent, the scanner says so and asks for it to be installed. The JSON→concept parsing, element mapping, and 2D layout are covered by instrumented tests (`GemmaMoleculeMapperTest`).
-
-Every screen **announces itself** on entry (title → intro → gesture instructions), so the app is usable without TalkBack — and cleanly with it (all controls carry `contentDescription`).
-
----
-
-## Concept library (v1)
-
-| Subject | Concept | What you feel & hear |
-|---|---|---|
-| 📐 Maths | Straight line `y = x` | Constant slope = steady vibration; pitch climbs evenly |
-| 📐 Maths | Parabola `y = x²` | Calm at the vertex, vibration grows with the steepening walls |
-| 📐 Maths | Sine `y = sin(x)` | Pitch swells and falls; ticks at every zero crossing; peaks/troughs announced |
-| 📐 Maths | Two lines crossing | **Guidance mode**: vibration homes you onto the intersection at (1, 3) |
-| ⚛️ Physics | Uniform motion (d–t) | A bus at 2 m/s: perfectly even slope |
-| ⚛️ Physics | Acceleration (d–t) | Vibration strengthens as the car speeds up — acceleration becomes touch |
-| ⚛️ Physics | Velocity–time | Rising then flat: feel the difference between speeding up and cruising |
-| ⚛️ Physics | **Wave Lab** | Build a wave with Freq/Amp buttons, then *hear and feel* it play |
-| 🧪 Chemistry | Water H₂O | Bent molecule; oxygen buzzes long, hydrogens tick |
-| 🧪 Chemistry | Carbon dioxide CO₂ | Linear; double bonds; carbon's double pulse in the middle |
-| 🧪 Chemistry | Methane CH₄ | Central carbon, four hydrogens; structure summary speaks the 109.5° tetrahedron |
-| 🧪 Chemistry | Salt NaCl | Dashed **ionic** bond; sodium's triple tick vs chlorine's long-short |
-
----
-
-## Project structure
-
-```
-app/src/main/java/com/technoblaze/drishtistem/
-├── MainActivity.kt                  # Single activity, Compose NavHost, engine lifecycle
-├── core/
-│   ├── Engines.kt                   # Bundles the three engines for the activity's lifetime
-│   ├── HapticEngine.kt              # VibrationEffect amplitude mapping, pulse/tick/patterns
-│   ├── ToneEngine.kt                # AudioTrack sine synth: pitch = y, pan = x
-│   ├── SpeechEngine.kt              # TextToSpeech queue, buffers until engine ready
-│   └── vision/
-│       ├── GemmaVision.kt           # Gemma 3n multimodal scanner: photo → JSON → concept
-│       └── GemmaMoleculeMapper.kt   # JSON → MoleculeConcept/GraphConcept + 2D layout
-├── model/
-│   ├── Concept.kt                   # Subject, GraphConcept (+ landmark auto-detection), WaveConcept
-│   └── Molecule.kt                  # Element (signatures + fromSymbol), Atom, Bond, MoleculeConcept
+```text
+app/src/main/java/com/sonari/app/
+├── MainActivity.kt
+├── a11y/Announcer.kt
+├── audio/
+│   ├── Sonifier.kt
+│   └── SweepPlayer.kt
 ├── data/
-│   ├── ConceptRepository.kt         # The hardcoded offline concept library
-│   └── ScannedConceptStore.kt       # In-memory holder for the latest scanned molecule/graph
-└── ui/
-    ├── home/HomeScreen.kt           # Subject cards + Scan entry + concept lists (accessible)
-    ├── graph/GraphExplorerScreen.kt # Flagship tactile graph canvas
-    ├── wave/WaveLabScreen.kt        # Frequency/amplitude lab
-    ├── molecule/MoleculeScreen.kt   # Tactile molecule canvas
-    └── scan/ScanScreen.kt           # Photo-picker upload → GemmaVision
+│   ├── EquationLoader.kt
+│   └── MoleculeLoader.kt
+├── engine/MappingEngine.kt
+├── haptic/Haptics.kt
+├── model/Renderable.kt
+├── ui/
+│   ├── HomeScreen.kt
+│   ├── ExplorerScreen.kt
+│   ├── TutorialScreen.kt
+│   └── SettingsScreen.kt
+└── voice/
+    ├── VoiceButton.kt
+    ├── VoiceCommand.kt
+    └── GemmaVoiceBrain.kt
 
-app/src/androidTest/java/com/technoblaze/drishtistem/
-└── GemmaMoleculeMapperTest.kt       # JSON-parsing + layout tests (no model needed)
+app/src/main/java/com/technoblaze/drishtistem/core/vision/cv/
+├── ImagePreprocessor.kt
+├── CurveExtractor.kt
+└── CurveNormaliser.kt
+
+Tests:
+- app/src/test/java/com/sonari/app/engine/
+- app/src/androidTest/java/com/technoblaze/drishtistem/
 ```
 
-## Scanner model setup (one-time)
+## Permissions used
 
-The Gemma 3n model is not bundled (~3.4 GB). Download `gemma-3n-E2B-it-int4.litertlm` from [google/gemma-3n-E2B-it-litert-lm](https://huggingface.co/google/gemma-3n-E2B-it-litert-lm) and push it to the app's storage:
+From `AndroidManifest.xml`:
 
-```bash
-adb shell mkdir -p /sdcard/Android/data/com.technoblaze.drishtistem/files/llm/
-adb push gemma-3n-E2B-it-int4.litertlm \
-  /sdcard/Android/data/com.technoblaze.drishtistem/files/llm/
-```
+- `INTERNET` (PubChem access)
+- `VIBRATE`
+- `RECORD_AUDIO` (voice command input)
 
-A high-RAM device (8 GB+, e.g. the Snapdragon flagship in the deck) is required; the first scan loads the model and is slower. Without the file, the scanner asks for the model to be installed.
-
-**Key design points**
-
-- **No network permission.** The manifest never requests INTERNET — offline is enforced by the OS, not promised by the app. Images come from the system photo picker (no camera or storage permission), the Gemma model is side-loaded (not downloaded), and images are processed in memory and never persisted.
-- **`minSdk 26`** — the floor for `VibrationEffect` amplitude control (the core of "a rising line feels stronger"). Devices without amplitude control gracefully fall back to duration-modulated pulses.
-- **Engines outlive screens.** One `Engines` instance is created in `MainActivity.onCreate` and shared by every screen; `onPause` silences everything instantly.
-- **Landmarks are computed, not authored.** `GraphConcept` numerically scans each curve for roots, peaks, and troughs, so adding a new graph is one lambda: `Curve("my curve") { x -> ... }`.
-
----
-
-## Getting started
+## Build and test
 
 ### Requirements
 
 - JDK 17
-- Android SDK (compileSdk 35) — or just open the project in Android Studio
-- A **physical Android phone** (Android 8.0+) — the emulator can't vibrate, and haptics are the point
+- Android SDK / Android Studio
 
-### Build & install
+### Commands
 
 ```bash
 ./gradlew assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+./gradlew testDebugUnitTest
+./gradlew lintDebug
 ```
 
-Or open the folder in Android Studio and press **Run**.
+## Current known issue in this environment
 
-### The 30-second demo
+During task validation, Gradle failed before build/test execution because the Android Gradle Plugin could not be resolved from remote repositories in the sandbox environment.
 
-1. **Airplane mode on** — everything still works.
-2. Open **Maths → Sine wave**, close your eyes, and trace a finger across the screen: pitch swells and falls with the wave, vibration tracks the slope, and zero crossings tick.
-3. Open **Two lines crossing**, double-tap for guidance mode, and let the vibration pull your finger to the intersection.
-4. Open **Chemistry → Water** and meet the atoms: oxygen's long buzz, hydrogen's light tick, bonds humming between them.
-
-### Verification checklist
-
-- [ ] `./gradlew assembleDebug` builds clean
-- [ ] App launches and home screen announces itself
-- [ ] Tracing a graph drives pitch (y), pan (x), and vibration (slope)
-- [ ] Guidance mode finds the intersection and announces "x = 1, y = 3"
-- [ ] Wave Lab plays the built wave as synchronized sound + vibration
-- [ ] Each element in H₂O is distinguishable by feel alone
-- [ ] Entire app works in airplane mode
-- [ ] With TalkBack on, every control is labelled and reachable
-
----
-
-## Roadmap
-
-| Phase | Milestone | Status |
-|---|---|---|
-| 1 | STEM learning pilots: offline concept library | ✅ Built |
-| 1.5 | **Camera scan pipeline**: CameraX + on-device, pure-Kotlin vision parses printed line graphs into explorable `GraphConcept`s | ✅ Built |
-| 1.6 | **Gemma 3n multimodal reader**: pick a photo of a molecular structure (or graph); on-device Gemma 3n E2B reads it into an explorable concept | ✅ Built |
-| 2 | Accessible e-books & diagrams | Planned |
-| 3 | Professional training modules | Planned |
-| 4 | Universal Accessibility SDK for any Android app | Planned |
-
----
-
-## Team
-
-**TechnoBlaze** — iQOO Hackathon, Bangalore
-
-> *If knowledge is universal, access to knowledge should be universal too.*
