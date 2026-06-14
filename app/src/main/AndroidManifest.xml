@@ -2,12 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.VIBRATE" />
-<<<<<<< HEAD
     <!-- Voice "find the point" hook; recognition prefers on-device. No INTERNET. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-=======
-    <uses-permission android:name="android.permission.INTERNET" />
->>>>>>> d9c553cfe3cea7d7b29cc487ebbf76e893fa0350
 
     <application
         android:allowBackup="true"
