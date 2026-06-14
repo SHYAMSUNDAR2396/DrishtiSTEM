@@ -18,7 +18,8 @@ class Haptics(private val vibrator: Vibrator) {
         else -> Tier.C
     }
 
-    // Short pulse confirming finger is on the feature (call at ~3 Hz while onFeature).
+    // Continuous vibration while finger is on a curve feature.
+    // Call once when entering the curve, then cancel() when leaving.
     fun contact() = when (tier) {
         Tier.A -> vibrator.vibrate(
             VibrationEffect.startComposition()
@@ -27,6 +28,48 @@ class Haptics(private val vibrator: Vibrator) {
         )
         Tier.B -> vibrator.vibrate(VibrationEffect.createOneShot(14, 48))
         Tier.C -> @Suppress("DEPRECATION") vibrator.vibrate(14)
+    }
+
+    // Pulsing "beeped" vibration while finger slides along a curve.
+    // Short buzz + gap = sonar-ping rhythm that confirms the user is on the graph.
+    fun feel() = when (tier) {
+        Tier.A -> vibrator.vibrate(
+            VibrationEffect.createWaveform(
+                longArrayOf(0, 60, 140),
+                intArrayOf(0, 130, 0),
+                0
+            )
+        )
+        Tier.B -> vibrator.vibrate(
+            VibrationEffect.createWaveform(
+                longArrayOf(0, 60, 140),
+                intArrayOf(0, 130, 0),
+                0
+            )
+        )
+        Tier.C -> @Suppress("DEPRECATION")
+        vibrator.vibrate(longArrayOf(0, 60, 140), 0)
+    }
+
+    // Steady continuous vibration — used at landmarks (max, min, intersection, etc.)
+    // so the user feels a clear contrast from the pulsing background.
+    fun steady() = when (tier) {
+        Tier.A -> vibrator.vibrate(
+            VibrationEffect.createWaveform(
+                longArrayOf(0, 300),
+                intArrayOf(0, 150),
+                0
+            )
+        )
+        Tier.B -> vibrator.vibrate(
+            VibrationEffect.createWaveform(
+                longArrayOf(0, 300),
+                intArrayOf(0, 150),
+                0
+            )
+        )
+        Tier.C -> @Suppress("DEPRECATION")
+        vibrator.vibrate(longArrayOf(0, 300), 0)
     }
 
     // Distinct double-pulse on landmark entry.

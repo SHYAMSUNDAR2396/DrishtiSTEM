@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -296,18 +297,16 @@ private fun OverviewCanvas(renderable: Renderable, playhead: Float, modifier: Mo
 }
 
 private fun DrawScope.drawPlayhead(normX: Float) {
-    val px = normX * size.width
-    drawLine(PLAYHEAD, Offset(px, 0f), Offset(px, size.height), strokeWidth = 3f)
-    // Small triangle indicator at top.
-    drawCircle(PLAYHEAD, radius = 8f, center = Offset(px, 10f))
+    val px = cl() + normX * cw()
+    val t = ct(); val b = size.height - cb()
+    drawLine(PLAYHEAD, Offset(px, t), Offset(px, b), strokeWidth = 3f)
+    drawCircle(PLAYHEAD, radius = 8f, center = Offset(px, t + 10f))
 }
 
 private fun DrawScope.drawLandmarkMarkers(renderable: Renderable) {
-    val xRange = renderable.xMax - renderable.xMin
-    val yRange = renderable.yMax - renderable.yMin
     for (lm in renderable.landmarks) {
-        val px = (lm.normX * size.width).toFloat()
-        val py = ((1.0 - lm.normY) * size.height).toFloat()
+        val px = (cl() + lm.normX * cw()).toFloat()
+        val py = (ct() + (1.0 - lm.normY) * ch()).toFloat()
         drawCircle(Color(0xFFFFEB3B), radius = 7f, center = Offset(px, py))
     }
 }
@@ -324,8 +323,6 @@ private fun ExploreContent(
     var normPos by remember { mutableStateOf<Offset?>(null) }
     var isTouching by remember { mutableStateOf(false) }
     var lastLandmark by remember { mutableStateOf<Landmark?>(null) }
-    var lastContactMs by remember { mutableLongStateOf(0L) }
-
     val cue: Cue? = remember(normPos, renderable) {
         normPos?.let { DefaultMappingEngine.cueAt(it.x.toDouble(), it.y.toDouble(), renderable) }
     }
@@ -335,22 +332,21 @@ private fun ExploreContent(
         else sonifier.setCue(440.0, 0.0, false)
     }
 
-    LaunchedEffect(cue?.landmark) {
+    LaunchedEffect(cue?.landmark, cue?.onFeature) {
         val lm = cue?.landmark
-        if (lm != null && lm != lastLandmark) { haptics.landmark(); announcer.landmark(lm) }
+        if (lm != null && lm != lastLandmark && cue?.onFeature == true) {
+            haptics.landmark()
+            haptics.steady()
+            announcer.landmark(lm)
+            kotlinx.coroutines.delay(1500)
+            if (isTouching) haptics.feel()
+        }
         lastLandmark = lm
     }
 
-    LaunchedEffect(isTouching) {
-        while (isTouching) {
-            kotlinx.coroutines.delay(300)
-            val now = System.currentTimeMillis()
-            if (cue?.onFeature == true && now - lastContactMs >= 280) {
-                haptics.contact()
-                lastContactMs = now
-            }
-        }
-        haptics.cancel()
+    LaunchedEffect(isTouching, cue?.onFeature) {
+        if (isTouching && cue?.onFeature == true) haptics.feel()
+        else haptics.cancel()
     }
 
     if (renderable is MoleculeGraph) {
@@ -429,6 +425,11 @@ private fun ExploreCanvas(
     onDoubleTap: (normX: Float, normY: Float) -> Unit
 ) {
     val tm = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val pInsetL = with(density) { 32.dp.toPx() }
+    val pInsetR = with(density) { 32.dp.toPx() }
+    val pInsetT = with(density) { 24.dp.toPx() }
+    val pInsetB = with(density) { 24.dp.toPx() }
     Canvas(
         modifier = modifier
             .semantics {
@@ -436,7 +437,10 @@ private fun ExploreCanvas(
                     "Interactive function canvas. Drag to hear the shape. " +
                     "Two-finger tap speaks coordinates. Double-tap speaks nearest landmark."
             }
-            .pointerInput(renderable) {
+            .pointerInput(renderable, pInsetL, pInsetR, pInsetT, pInsetB) {
+                val contentW = (size.width - pInsetL - pInsetR).toFloat()
+                val contentH = (size.height - pInsetT - pInsetB).toFloat()
+
                 // lastTapMs/lastTapNorm persist across gestures (vars outside awaitEachGesture).
                 var lastTapMs = 0L
                 var lastTapNorm = Offset.Zero
@@ -445,8 +449,8 @@ private fun ExploreCanvas(
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val downMs = System.currentTimeMillis()
                     val downNorm = Offset(
-                        (down.position.x / size.width).coerceIn(0f, 1f),
-                        (down.position.y / size.height).coerceIn(0f, 1f)
+                        ((down.position.x - pInsetL) / contentW).coerceIn(0f, 1f),
+                        ((down.position.y - pInsetT) / contentH).coerceIn(0f, 1f)
                     )
                     val isDoubleTap = downMs - lastTapMs < 300 &&
                         (downNorm - lastTapNorm).getDistance() < 0.15f
@@ -485,8 +489,8 @@ private fun ExploreCanvas(
 
                         primary.consume()
                         val norm = Offset(
-                            (primary.position.x / size.width).coerceIn(0f, 1f),
-                            (primary.position.y / size.height).coerceIn(0f, 1f)
+                            ((primary.position.x - pInsetL) / contentW).coerceIn(0f, 1f),
+                            ((primary.position.y - pInsetT) / contentH).coerceIn(0f, 1f)
                         )
                         if ((norm - downNorm).getDistance() > 0.02f) dragged = true
                         onTouchMove(norm)
@@ -511,19 +515,29 @@ private fun ExploreCanvas(
 
 // ─── Shared canvas drawing ───────────────────────────────────────────────────
 
+// Content insets — graph elements render inside this padded area.
+private fun DrawScope.cl(): Float = 32f * density
+private fun DrawScope.cr(): Float = 32f * density
+private fun DrawScope.ct(): Float = 24f * density
+private fun DrawScope.cb(): Float = 24f * density
+private fun DrawScope.cw(): Float = size.width - cl() - cr()
+private fun DrawScope.ch(): Float = size.height - ct() - cb()
+
 private fun DrawScope.drawBackground() = drawRect(BG)
 
 private fun DrawScope.drawGrid(r: Renderable) {
     val xRange = r.xMax - r.xMin
     val yRange = r.yMax - r.yMin
+    val left = cl(); val cw = cw(); val top = ct(); val ch = ch()
+    val rightEdge = size.width - cr(); val bottomEdge = size.height - cb()
 
     var gx = Math.ceil(r.xMin / niceStep(xRange / 6)) * niceStep(xRange / 6)
     val xStep = niceStep(xRange / 6)
     while (gx <= r.xMax) {
-        val px = ((gx - r.xMin) / xRange * size.width).toFloat()
+        val px = (left + (gx - r.xMin) / xRange * cw).toFloat()
         drawLine(
             color = if (Math.abs(gx) < xStep * 0.01) AXIS else GRID,
-            start = Offset(px, 0f), end = Offset(px, size.height),
+            start = Offset(px, top), end = Offset(px, bottomEdge),
             strokeWidth = if (Math.abs(gx) < xStep * 0.01) 2f else 1f
         )
         gx += xStep
@@ -532,10 +546,10 @@ private fun DrawScope.drawGrid(r: Renderable) {
     val yStep = niceStep(yRange / 6)
     var gy = Math.ceil(r.yMin / yStep) * yStep
     while (gy <= r.yMax) {
-        val py = ((1.0 - (gy - r.yMin) / yRange) * size.height).toFloat()
+        val py = (top + (1.0 - (gy - r.yMin) / yRange) * ch).toFloat()
         drawLine(
             color = if (Math.abs(gy) < yStep * 0.01) AXIS else GRID,
-            start = Offset(0f, py), end = Offset(size.width, py),
+            start = Offset(left, py), end = Offset(rightEdge, py),
             strokeWidth = if (Math.abs(gy) < yStep * 0.01) 2f else 1f
         )
         gy += yStep
@@ -546,13 +560,14 @@ private fun DrawScope.drawCurve(r: Renderable, onFeature: Boolean) {
     if (r !is LineChart || r.samples.isEmpty()) return
     val xRange = r.xMax - r.xMin
     val yRange = r.yMax - r.yMin
+    val left = cl(); val cw = cw(); val top = ct(); val ch = ch()
     val path = Path()
     var first = true
     for (pt in r.samples) {
-        val px = ((pt.x - r.xMin) / xRange * size.width).toFloat()
+        val px = (left + (pt.x - r.xMin) / xRange * cw).toFloat()
         val normY = (pt.y - r.yMin) / yRange
         if (normY < -0.15 || normY > 1.15) { first = true; continue }
-        val py = ((1.0 - normY) * size.height).toFloat()
+        val py = (top + (1.0 - normY) * ch).toFloat()
         if (first) { path.moveTo(px, py); first = false } else path.lineTo(px, py)
     }
     drawPath(
@@ -563,9 +578,10 @@ private fun DrawScope.drawCurve(r: Renderable, onFeature: Boolean) {
 }
 
 private fun DrawScope.drawFinger(normPos: Offset, cue: Cue?) {
-    val cx = normPos.x * size.width
-    val cy = normPos.y * size.height
-    drawLine(FINGER_DOT.copy(alpha = 0.25f), Offset(cx, 0f), Offset(cx, size.height), 1f)
+    val left = cl(); val cw = cw(); val top = ct(); val ch = ch()
+    val cx = left + normPos.x * cw
+    val cy = top + normPos.y * ch
+    drawLine(FINGER_DOT.copy(alpha = 0.25f), Offset(cx, top), Offset(cx, top + ch), 1f)
     if (cue?.onFeature == true) {
         drawCircle(CURVE_ACTIVE.copy(alpha = 0.2f), 36f, Offset(cx, cy))
     }
@@ -578,11 +594,12 @@ private fun DrawScope.drawMolecule(
     tm: androidx.compose.ui.text.TextMeasurer
 ) {
     val atomRadius = 42f
+    val left = cl(); val cw = cw(); val top = ct(); val ch = ch()
     for (bond in r.bonds) {
         if (bond.fromIndex >= r.atoms.size || bond.toIndex >= r.atoms.size) continue
         val a = r.atoms[bond.fromIndex]; val b = r.atoms[bond.toIndex]
-        val ax = a.normX.toFloat() * size.width; val ay = a.normY.toFloat() * size.height
-        val bx = b.normX.toFloat() * size.width; val by = b.normY.toFloat() * size.height
+        val ax = left + a.normX.toFloat() * cw; val ay = top + a.normY.toFloat() * ch
+        val bx = left + b.normX.toFloat() * cw; val by = top + b.normY.toFloat() * ch
         drawLine(BOND_COLOR, Offset(ax, ay), Offset(bx, by), strokeWidth = 8f, cap = StrokeCap.Round)
         if (bond.order >= 2) {
             val dx = (by - ay); val dy = -(bx - ax)
@@ -593,10 +610,10 @@ private fun DrawScope.drawMolecule(
         }
     }
     for (atom in r.atoms) {
-        val px = atom.normX.toFloat() * size.width
-        val py = atom.normY.toFloat() * size.height
+        val px = left + atom.normX.toFloat() * cw
+        val py = top + atom.normY.toFloat() * ch
         val nearFinger = fingerNorm != null &&
-            hypot((px / size.width - fingerNorm.x), (py / size.height - fingerNorm.y)) < 0.08f
+            hypot((atom.normX.toFloat() - fingerNorm.x), (atom.normY.toFloat() - fingerNorm.y)) < 0.08f
         val fill = elementColor(atom.element)
         if (nearFinger) drawCircle(CURVE_ACTIVE.copy(alpha = 0.3f), atomRadius + 16f, Offset(px, py))
         drawCircle(fill, radius = atomRadius, center = Offset(px, py))

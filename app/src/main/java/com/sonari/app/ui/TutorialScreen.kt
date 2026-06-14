@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -69,7 +70,7 @@ private val FINGER_T = Color(0xFFFFEB3B)
 
 // ─── Step definitions ─────────────────────────────────────────────────────────
 
-private enum class Practice { NONE, DRAG, TWO_FINGER_TAP, DOUBLE_TAP }
+private enum class Practice { NONE, DRAG, TWO_FINGER_TAP, DOUBLE_TAP, ANCHORS }
 
 private data class Step(
     val title: String,
@@ -116,7 +117,8 @@ private val STEPS = listOf(
                "Left edge is x minimum. Right edge is x maximum. " +
                "Top edge is y maximum. Bottom edge is y minimum. " +
                "Press any edge with a finger to orient yourself before exploring.",
-        hint = "Press the left edge of the practice area to find x minimum."
+        hint = "Press the left edge of the practice area to find x minimum.",
+        practice = Practice.ANCHORS
     ),
     Step(
         title = "Gesture: two-finger tap",
@@ -367,9 +369,10 @@ private fun PracticeCanvas(
     var normPos by remember { mutableStateOf<Offset?>(null) }
     var isTouching by remember { mutableStateOf(false) }
     var lastLandmark by remember { mutableStateOf<Landmark?>(null) }
-    var lastContactMs by remember { mutableLongStateOf(0L) }
+
     var lastTapMs by remember { mutableLongStateOf(0L) }
     var lastTapNorm by remember { mutableStateOf(Offset.Zero) }
+    var currentAnchorZone by remember { mutableStateOf("") }
 
     val r: Renderable = PRACTICE_RENDERABLE
 
@@ -385,21 +388,20 @@ private fun PracticeCanvas(
         }
     }
 
-    LaunchedEffect(cue?.landmark) {
+    LaunchedEffect(cue?.landmark, cue?.onFeature, practice) {
         val lm = cue?.landmark
-        if (lm != null && lm != lastLandmark) { haptics.landmark(); announcer.landmark(lm) }
+        if (lm != null && lm != lastLandmark && cue?.onFeature == true && practice != Practice.ANCHORS) {
+            haptics.landmark(); announcer.landmark(lm)
+        }
         lastLandmark = lm
     }
 
-    LaunchedEffect(isTouching) {
-        while (isTouching) {
-            delay(300)
-            val now = System.currentTimeMillis()
-            if (cue?.onFeature == true && now - lastContactMs >= 280) {
-                haptics.contact(); lastContactMs = now
-            }
+    LaunchedEffect(isTouching, cue?.onFeature, practice) {
+        if (practice != Practice.ANCHORS && isTouching && cue?.onFeature == true) {
+            haptics.feel()
+        } else {
+            haptics.cancel()
         }
-        haptics.cancel()
     }
 
     Box(
@@ -434,6 +436,26 @@ private fun PracticeCanvas(
                         down.consume()
                         isTouching = true
                         normPos = downNorm
+                        if (practice == Practice.ANCHORS) {
+                            val ed = 0.12f
+                            val ol = downNorm.x < ed; val orr = downNorm.x > 1f - ed
+                            val ot = downNorm.y < ed; val ob = downNorm.y > 1f - ed
+                            val zone = buildString {
+                                if (ol) append("L"); if (orr) append("R")
+                                if (ot) append("T"); if (ob) append("B")
+                            }
+                            if (zone.isNotEmpty() && zone != currentAnchorZone) {
+                                currentAnchorZone = zone
+                                val parts = mutableListOf<String>()
+                                if (ol) parts.add("Left edge: x minimum, %.2f".format(r.xMin))
+                                if (orr) parts.add("Right edge: x maximum, %.2f".format(r.xMax))
+                                if (ot) parts.add("Top edge: y maximum, %.2f".format(r.yMax))
+                                if (ob) parts.add("Bottom edge: y minimum, %.2f".format(r.yMin))
+                                haptics.contact(); announcer.announce(parts.joinToString(". "))
+                            } else if (zone.isEmpty() && currentAnchorZone.isNotEmpty()) {
+                                currentAnchorZone = ""
+                            }
+                        }
 
                         var twoFingers = false
                         var dragged = false
@@ -470,6 +492,7 @@ private fun PracticeCanvas(
                                 }
                                 isTouching = false
                                 normPos = null
+                                if (practice == Practice.ANCHORS) currentAnchorZone = ""
                                 break
                             }
                             p.consume()
@@ -479,12 +502,47 @@ private fun PracticeCanvas(
                             )
                             if ((n - downNorm).getDistance() > 0.03f) dragged = true
                             normPos = n
+                            if (practice == Practice.ANCHORS) {
+                                val ed = 0.12f
+                                val ol = n.x < ed; val orr = n.x > 1f - ed
+                                val ot = n.y < ed; val ob = n.y > 1f - ed
+                                val zone = buildString {
+                                    if (ol) append("L"); if (orr) append("R")
+                                    if (ot) append("T"); if (ob) append("B")
+                                }
+                                if (zone.isNotEmpty() && zone != currentAnchorZone) {
+                                    currentAnchorZone = zone
+                                    val parts = mutableListOf<String>()
+                                    if (ol) parts.add("Left edge: x minimum, %.2f".format(r.xMin))
+                                    if (orr) parts.add("Right edge: x maximum, %.2f".format(r.xMax))
+                                    if (ot) parts.add("Top edge: y maximum, %.2f".format(r.yMax))
+                                    if (ob) parts.add("Bottom edge: y minimum, %.2f".format(r.yMin))
+                                    haptics.contact(); announcer.announce(parts.joinToString(". "))
+                                } else if (zone.isEmpty() && currentAnchorZone.isNotEmpty()) {
+                                    currentAnchorZone = ""
+                                }
+                            }
                         }
                     }
                 }
         ) {
             // Background.
             drawRect(CARD_T)
+
+            // Edge zone indicators (for anchors practice).
+            if (practice == Practice.ANCHORS) {
+                val edgeW = size.width * 0.12f; val edgeH = size.height * 0.12f
+                val base = ACCENT_T.copy(alpha = 0.10f)
+                val active = ACCENT_T.copy(alpha = 0.30f)
+                drawRect(if (currentAnchorZone.contains("L")) active else base,
+                    topLeft = Offset.Zero, size = Size(edgeW, size.height))
+                drawRect(if (currentAnchorZone.contains("R")) active else base,
+                    topLeft = Offset(size.width - edgeW, 0f), size = Size(edgeW, size.height))
+                drawRect(if (currentAnchorZone.contains("T")) active else base,
+                    topLeft = Offset.Zero, size = Size(size.width, edgeH))
+                drawRect(if (currentAnchorZone.contains("B")) active else base,
+                    topLeft = Offset(0f, size.height - edgeH), size = Size(size.width, edgeH))
+            }
 
             // Grid (just y=0 axis).
             val midY = size.height / 2f

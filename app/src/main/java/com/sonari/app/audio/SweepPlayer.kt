@@ -38,12 +38,13 @@ class SweepPlayer(
             sonifier.setCue(freqHz, pan = 0.0, active = true)
             onProgress(normX.toFloat())
 
-            // Landmark earcon: haptic pulse when sweep crosses a landmark.
+            // Landmark earcon + spoken label when sweep crosses a landmark.
+            // speakAndWait suspends so the user hears the full announcement before the sweep advances.
             renderable.landmarks.forEachIndexed { idx, lm ->
                 if (idx !in firedLandmarks && abs(normX - lm.normX) < 0.018) {
                     firedLandmarks += idx
                     haptics.landmark()
-                    announcer.landmark(lm)
+                    announcer.speakAndWait(lm.label)
                 }
             }
 

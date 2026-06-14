@@ -2,10 +2,13 @@ package com.sonari.app.a11y
 
 import android.content.Context
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import com.sonari.app.model.Landmark
 import com.sonari.app.model.MoleculeGraph
 import com.sonari.app.model.Renderable
 import java.util.Locale
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 class Announcer(context: Context) {
 
@@ -23,6 +26,47 @@ class Announcer(context: Context) {
     fun announce(text: String) {
         if (!ready) return
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "sonari-${text.hashCode()}")
+    }
+
+    /** Speak [text] and suspend until the utterance finishes playing. */
+    suspend fun speakAndWait(text: String) = suspendCancellableCoroutine<Unit> { cont ->
+        if (!ready) {
+            cont.resume(Unit)
+            return@suspendCancellableCoroutine
+        }
+        val utteranceId = "sonari-${text.hashCode()}-${System.nanoTime()}"
+
+        tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onDone(uid: String) {
+                if (uid != utteranceId) return
+                tts.setOnUtteranceProgressListener(null)
+                cont.resume(Unit)
+            }
+            override fun onError(uid: String?, errorCode: Int) {
+                if (uid != utteranceId) return
+                tts.setOnUtteranceProgressListener(null)
+                cont.resume(Unit)
+            }
+            @Deprecated("Override onError(String,int) instead", ReplaceWith("onError(utteranceId, errorCode)"))
+            override fun onError(uid: String?) {
+                if (uid != utteranceId) return
+                tts.setOnUtteranceProgressListener(null)
+                cont.resume(Unit)
+            }
+            override fun onStart(uid: String?) {}
+        })
+
+        val result = tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+        if (result == TextToSpeech.ERROR) {
+            tts.setOnUtteranceProgressListener(null)
+            cont.resume(Unit)
+            return@suspendCancellableCoroutine
+        }
+
+        cont.invokeOnCancellation {
+            tts.setOnUtteranceProgressListener(null)
+            tts.stop()
+        }
     }
 
     fun coordinates(normX: Double, normY: Double, r: Renderable) {
