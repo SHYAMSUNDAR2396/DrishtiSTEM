@@ -4,7 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.awaitPointerEvent
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -44,6 +45,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -67,6 +69,7 @@ private val GRID = Color(0xFF2C2D31)
 private val AXIS = Color(0xFF4A4B50)
 private val CURVE_IDLE = Color(0xFFCCCCCC)
 private val CURVE_ACTIVE = Color(0xFF4FC3F7)
+private val BOND_COLOR = Color(0xFFB8BCC4)
 private val FINGER_DOT = Color(0xFFFFEB3B)
 private val PLAYHEAD = Color(0xFF4FC3F7)
 private val TAB_ACTIVE = Color(0xFF4FC3F7)
@@ -183,11 +186,20 @@ private fun OverviewContent(
 ) {
     // Molecules don't have a natural sweep — show the graph and redirect to Explore.
     if (renderable is MoleculeGraph) {
+        LaunchedEffect(renderable) { announcer.molecule(renderable) }
         Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
-            OverviewCanvas(renderable, 0f, Modifier.fillMaxWidth().weight(1f))
+            OverviewCanvas(
+                renderable, 0f,
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .pointerInput(renderable) {
+                        detectTapGestures { announcer.molecule(renderable) }
+                    }
+            )
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                "Switch to Explore mode to trace atoms and bonds",
+                "Tap the molecule to hear its description · Switch to Explore mode to trace atoms and bonds",
                 color = Color(0xFF888888),
                 fontSize = 13.sp,
                 modifier = Modifier.padding(horizontal = 24.dp)
@@ -319,7 +331,7 @@ private fun ExploreContent(
     }
 
     LaunchedEffect(cue, isTouching) {
-        if (isTouching && cue != null) sonifier.setCue(cue.freqHz, cue.pan, true)
+        if (isTouching && cue?.onFeature == true) sonifier.setCue(cue.freqHz, cue.pan, true)
         else sonifier.setCue(440.0, 0.0, false)
     }
 
@@ -341,6 +353,10 @@ private fun ExploreContent(
         haptics.cancel()
     }
 
+    if (renderable is MoleculeGraph) {
+        LaunchedEffect(renderable) { announcer.molecule(renderable) }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         ExploreStatusBar(cue, isTouching, renderable)
 
@@ -354,6 +370,9 @@ private fun ExploreContent(
             onTouchStart = { isTouching = true; normPos = it },
             onTouchMove = { normPos = it },
             onTouchEnd = { isTouching = false; normPos = null },
+            onSingleTap = {
+                if (renderable is MoleculeGraph) announcer.molecule(renderable)
+            },
             onTwoFingerTap = { nx, ny ->
                 val nearest = renderable.landmarks.minByOrNull { lm ->
                     Math.hypot(nx - lm.normX, ny - lm.normY)
@@ -367,7 +386,10 @@ private fun ExploreContent(
         )
 
         Text(
-            text = "Drag · Two-finger tap = nearest landmark · Double-tap = coordinates",
+            text = if (renderable is MoleculeGraph)
+                "Tap = describe molecule · Drag = trace · Two-finger tap = nearest atom"
+            else
+                "Drag · Two-finger tap = nearest landmark · Double-tap = coordinates",
             color = Color(0xFF555555),
             fontSize = 11.sp,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
@@ -402,6 +424,7 @@ private fun ExploreCanvas(
     onTouchStart: (Offset) -> Unit,
     onTouchMove: (Offset) -> Unit,
     onTouchEnd: () -> Unit,
+    onSingleTap: () -> Unit = {},
     onTwoFingerTap: (normX: Float, normY: Float) -> Unit,
     onDoubleTap: (normX: Float, normY: Float) -> Unit
 ) {
@@ -453,6 +476,7 @@ private fun ExploreCanvas(
                                 !twoFingers && isTap -> {
                                     lastTapMs = upMs
                                     lastTapNorm = downNorm
+                                    onSingleTap()
                                 }
                             }
                             onTouchEnd()
@@ -553,37 +577,58 @@ private fun DrawScope.drawMolecule(
     fingerNorm: Offset?,
     tm: androidx.compose.ui.text.TextMeasurer
 ) {
-    // Bonds drawn first (underneath atoms).
+    val atomRadius = 42f
     for (bond in r.bonds) {
         if (bond.fromIndex >= r.atoms.size || bond.toIndex >= r.atoms.size) continue
         val a = r.atoms[bond.fromIndex]; val b = r.atoms[bond.toIndex]
         val ax = a.normX.toFloat() * size.width; val ay = a.normY.toFloat() * size.height
         val bx = b.normX.toFloat() * size.width; val by = b.normY.toFloat() * size.height
-        drawLine(CURVE_IDLE, Offset(ax, ay), Offset(bx, by), strokeWidth = 4f, cap = StrokeCap.Round)
+        drawLine(BOND_COLOR, Offset(ax, ay), Offset(bx, by), strokeWidth = 8f, cap = StrokeCap.Round)
         if (bond.order >= 2) {
             val dx = (by - ay); val dy = -(bx - ax)
             val len = hypot(dx, dy).coerceAtLeast(1f)
-            val offX = dx / len * 6f; val offY = dy / len * 6f
-            drawLine(CURVE_IDLE, Offset(ax + offX, ay + offY), Offset(bx + offX, by + offY), 4f)
+            val offX = dx / len * 10f; val offY = dy / len * 10f
+            drawLine(BOND_COLOR, Offset(ax + offX, ay + offY), Offset(bx + offX, by + offY), 8f)
+            drawLine(BOND_COLOR, Offset(ax - offX, ay - offY), Offset(bx - offX, by - offY), 8f)
         }
     }
-    // Atoms with element labels.
     for (atom in r.atoms) {
         val px = atom.normX.toFloat() * size.width
         val py = atom.normY.toFloat() * size.height
         val nearFinger = fingerNorm != null &&
             hypot((px / size.width - fingerNorm.x), (py / size.height - fingerNorm.y)) < 0.08f
-        val bg = if (nearFinger) CURVE_ACTIVE.copy(alpha = 0.3f) else Color(0xFF2A2B2E)
-        drawCircle(bg, radius = 22f, center = Offset(px, py))
-        drawCircle(if (nearFinger) CURVE_ACTIVE else AXIS, radius = 22f, center = Offset(px, py),
-            style = Stroke(2f))
+        val fill = elementColor(atom.element)
+        if (nearFinger) drawCircle(CURVE_ACTIVE.copy(alpha = 0.3f), atomRadius + 16f, Offset(px, py))
+        drawCircle(fill, radius = atomRadius, center = Offset(px, py))
+        drawCircle(
+            if (nearFinger) CURVE_ACTIVE else Color.White.copy(alpha = 0.85f),
+            radius = atomRadius, center = Offset(px, py), style = Stroke(3f)
+        )
         val measured = tm.measure(
             atom.element,
-            TextStyle(color = if (nearFinger) CURVE_ACTIVE else Color.White, fontSize = 12.sp)
+            TextStyle(color = labelColorFor(fill), fontSize = 20.sp, fontWeight = FontWeight.Bold)
         )
         drawText(measured, topLeft = Offset(px - measured.size.width / 2f, py - measured.size.height / 2f))
     }
 }
+
+private fun elementColor(element: String): Color = when (element.trim()) {
+    "H" -> Color(0xFFEDEDED)
+    "C" -> Color(0xFF4A4A4F)
+    "N" -> Color(0xFF3B5BFF)
+    "O" -> Color(0xFFFF4136)
+    "S" -> Color(0xFFFFD400)
+    "P" -> Color(0xFFFF8000)
+    "F" -> Color(0xFF59E0A0)
+    "Cl" -> Color(0xFF2ECC40)
+    "Br" -> Color(0xFFB5462A)
+    "Na" -> Color(0xFFB14CF0)
+    "K" -> Color(0xFF8F40D4)
+    else -> Color(0xFFE0609A)
+}
+
+private fun labelColorFor(fill: Color): Color =
+    if (fill.luminance() > 0.5f) Color(0xFF111111) else Color.White
 
 private fun niceStep(rough: Double): Double {
     if (rough <= 0) return 1.0

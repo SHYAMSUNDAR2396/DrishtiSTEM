@@ -4,9 +4,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.awaitPointerEvent
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -378,7 +378,7 @@ private fun PracticeCanvas(
     }
 
     LaunchedEffect(cue, isTouching) {
-        if (practice == Practice.DRAG && isTouching && cue != null) {
+        if (practice == Practice.DRAG && isTouching && cue?.onFeature == true) {
             sonifier.setCue(cue.freqHz, 0.0, true)
         } else {
             sonifier.setCue(440.0, 0.0, false)

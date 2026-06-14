@@ -46,7 +46,8 @@ object DefaultMappingEngine : MappingEngine {
         val clamped = featureNY < 0.0 || featureNY > 1.0
         val cFNY = featureNY.coerceIn(0.0, 1.0)
         val freqHz = FREQ_LOW * (FREQ_HIGH / FREQ_LOW).pow(cFNY)
-        val onFeature = abs(ny - cFNY) < FEATURE_TOL
+        val curveYInScreenSpace = 1.0 - cFNY
+        val onFeature = abs(ny - curveYInScreenSpace) < FEATURE_TOL
         val nearestLandmark = r.landmarks.firstOrNull { abs(nx - it.normX) < LANDMARK_TOL }
         return Cue(freqHz, nx * 2.0 - 1.0, onFeature, nearestLandmark, quadrantOf(nx, ny), clamped)
     }
