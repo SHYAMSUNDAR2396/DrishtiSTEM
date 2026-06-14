@@ -19,6 +19,24 @@ data class Landmark(
     enum class Type { INTERCEPT, EXTREMUM, ATOM }
 }
 
+/** Relative display radii for atoms, proportional to real covalent radii (C = 1.0). */
+fun atomDisplayRadius(element: String): Float = when (element.trim()) {
+    "H" -> 0.70f
+    "B" -> 1.00f
+    "C" -> 1.00f
+    "N" -> 0.90f
+    "O" -> 0.85f
+    "F" -> 0.80f
+    "P" -> 1.20f
+    "S" -> 1.15f
+    "Cl" -> 1.10f
+    "Br" -> 1.30f
+    "I" -> 1.50f
+    "Na" -> 1.30f
+    "K" -> 1.50f
+    else -> 1.00f
+}
+
 data class LineChart(
     override val xMin: Double,
     override val xMax: Double,

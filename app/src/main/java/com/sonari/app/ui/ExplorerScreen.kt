@@ -61,6 +61,7 @@ import com.sonari.app.model.Landmark
 import com.sonari.app.model.LineChart
 import com.sonari.app.model.MoleculeGraph
 import com.sonari.app.model.Renderable
+import com.sonari.app.model.atomDisplayRadius
 import kotlin.math.hypot
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
@@ -323,6 +324,8 @@ private fun ExploreContent(
     var normPos by remember { mutableStateOf<Offset?>(null) }
     var isTouching by remember { mutableStateOf(false) }
     var lastLandmark by remember { mutableStateOf<Landmark?>(null) }
+    var lastTouchedAtom by remember { mutableStateOf<String?>(null) }
+    var lastTouchedBond by remember { mutableStateOf<Int?>(null) }
     val cue: Cue? = remember(normPos, renderable) {
         normPos?.let { DefaultMappingEngine.cueAt(it.x.toDouble(), it.y.toDouble(), renderable) }
     }
@@ -332,16 +335,18 @@ private fun ExploreContent(
         else sonifier.setCue(440.0, 0.0, false)
     }
 
-    LaunchedEffect(cue?.landmark, cue?.onFeature) {
-        val lm = cue?.landmark
-        if (lm != null && lm != lastLandmark && cue?.onFeature == true) {
-            haptics.landmark()
-            haptics.steady()
-            announcer.landmark(lm)
-            kotlinx.coroutines.delay(1500)
-            if (isTouching) haptics.feel()
+    if (renderable !is MoleculeGraph) {
+        LaunchedEffect(cue?.landmark, cue?.onFeature) {
+            val lm = cue?.landmark
+            if (lm != null && lm != lastLandmark && cue?.onFeature == true) {
+                haptics.landmark()
+                haptics.steady()
+                announcer.landmark(lm)
+                kotlinx.coroutines.delay(1500)
+                if (isTouching) haptics.feel()
+            }
+            lastLandmark = lm
         }
-        lastLandmark = lm
     }
 
     LaunchedEffect(isTouching, cue?.onFeature) {
@@ -351,6 +356,24 @@ private fun ExploreContent(
 
     if (renderable is MoleculeGraph) {
         LaunchedEffect(renderable) { announcer.molecule(renderable) }
+
+        LaunchedEffect(cue?.touchedAtom, isTouching, cue?.onFeature) {
+            val ta = if (isTouching && cue?.onFeature == true) cue?.touchedAtom else null
+            if (ta != null && ta != lastTouchedAtom) {
+                haptics.atomSignature(ta)
+                announcer.speakAtom(ta)
+            }
+            lastTouchedAtom = ta
+        }
+
+        LaunchedEffect(cue?.touchedBond, isTouching, cue?.onFeature) {
+            val tb = if (isTouching && cue?.onFeature == true) cue?.touchedBond else null
+            if (tb != null && tb != lastTouchedBond) {
+                haptics.bondSignature(tb)
+                announcer.speakBond(tb)
+            }
+            lastTouchedBond = tb
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -593,33 +616,49 @@ private fun DrawScope.drawMolecule(
     fingerNorm: Offset?,
     tm: androidx.compose.ui.text.TextMeasurer
 ) {
-    val atomRadius = 42f
+    val baseRadius = 120f
     val left = cl(); val cw = cw(); val top = ct(); val ch = ch()
+
     for (bond in r.bonds) {
         if (bond.fromIndex >= r.atoms.size || bond.toIndex >= r.atoms.size) continue
         val a = r.atoms[bond.fromIndex]; val b = r.atoms[bond.toIndex]
         val ax = left + a.normX.toFloat() * cw; val ay = top + a.normY.toFloat() * ch
         val bx = left + b.normX.toFloat() * cw; val by = top + b.normY.toFloat() * ch
-        drawLine(BOND_COLOR, Offset(ax, ay), Offset(bx, by), strokeWidth = 8f, cap = StrokeCap.Round)
-        if (bond.order >= 2) {
-            val dx = (by - ay); val dy = -(bx - ax)
-            val len = hypot(dx, dy).coerceAtLeast(1f)
-            val offX = dx / len * 10f; val offY = dy / len * 10f
-            drawLine(BOND_COLOR, Offset(ax + offX, ay + offY), Offset(bx + offX, by + offY), 8f)
-            drawLine(BOND_COLOR, Offset(ax - offX, ay - offY), Offset(bx - offX, by - offY), 8f)
+        val bondWidth = when (bond.order) { 1 -> 6f; 2 -> 8f; else -> 10f }
+        when (bond.order) {
+            1 -> {
+                drawLine(BOND_COLOR, Offset(ax, ay), Offset(bx, by), strokeWidth = bondWidth, cap = StrokeCap.Round)
+            }
+            2 -> {
+                val dx = (by - ay); val dy = -(bx - ax)
+                val len = hypot(dx, dy).coerceAtLeast(1f)
+                val offX = dx / len * 10f; val offY = dy / len * 10f
+                drawLine(BOND_COLOR, Offset(ax + offX, ay + offY), Offset(bx + offX, by + offY), bondWidth, cap = StrokeCap.Round)
+                drawLine(BOND_COLOR, Offset(ax - offX, ay - offY), Offset(bx - offX, by - offY), bondWidth, cap = StrokeCap.Round)
+            }
+            else -> {
+                val dx = (by - ay); val dy = -(bx - ax)
+                val len = hypot(dx, dy).coerceAtLeast(1f)
+                val offX = dx / len * 12f; val offY = dy / len * 12f
+                drawLine(BOND_COLOR, Offset(ax, ay), Offset(bx, by), bondWidth, cap = StrokeCap.Round)
+                drawLine(BOND_COLOR, Offset(ax + offX, ay + offY), Offset(bx + offX, by + offY), bondWidth, cap = StrokeCap.Round)
+                drawLine(BOND_COLOR, Offset(ax - offX, ay - offY), Offset(bx - offX, by - offY), bondWidth, cap = StrokeCap.Round)
+            }
         }
     }
+
     for (atom in r.atoms) {
         val px = left + atom.normX.toFloat() * cw
         val py = top + atom.normY.toFloat() * ch
+        val radius = baseRadius * atomDisplayRadius(atom.element)
         val nearFinger = fingerNorm != null &&
-            hypot((atom.normX.toFloat() - fingerNorm.x), (atom.normY.toFloat() - fingerNorm.y)) < 0.08f
+            hypot((atom.normX.toFloat() - fingerNorm.x), (atom.normY.toFloat() - fingerNorm.y)) < 0.23f
         val fill = elementColor(atom.element)
-        if (nearFinger) drawCircle(CURVE_ACTIVE.copy(alpha = 0.3f), atomRadius + 16f, Offset(px, py))
-        drawCircle(fill, radius = atomRadius, center = Offset(px, py))
+        if (nearFinger) drawCircle(CURVE_ACTIVE.copy(alpha = 0.3f), radius + 12f, Offset(px, py))
+        drawCircle(fill, radius = radius, center = Offset(px, py))
         drawCircle(
             if (nearFinger) CURVE_ACTIVE else Color.White.copy(alpha = 0.85f),
-            radius = atomRadius, center = Offset(px, py), style = Stroke(3f)
+            radius = radius, center = Offset(px, py), style = Stroke(3f)
         )
         val measured = tm.measure(
             atom.element,

@@ -87,6 +87,78 @@ class Haptics(private val vibrator: Vibrator) {
         vibrator.vibrate(longArrayOf(0, 45, 65, 45), -1)
     }
 
+    fun atomSignature(element: String) = when (element.trim()) {
+        "H" -> when (tier) {
+            Tier.A -> vibrator.vibrate(
+                VibrationEffect.startComposition()
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, 0.3f)
+                    .compose()
+            )
+            Tier.B -> vibrator.vibrate(VibrationEffect.createOneShot(20, 80))
+            Tier.C -> @Suppress("DEPRECATION") vibrator.vibrate(20)
+        }
+        "O" -> when (tier) {
+            Tier.A -> vibrator.vibrate(
+                VibrationEffect.startComposition()
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, 0.6f)
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, 0.6f, 100)
+                    .compose()
+            )
+            Tier.B -> vibrator.vibrate(
+                VibrationEffect.createWaveform(longArrayOf(0, 80, 60, 60), intArrayOf(0, 160, 0, 120), -1)
+            )
+            Tier.C -> @Suppress("DEPRECATION")
+            vibrator.vibrate(longArrayOf(0, 80, 60, 60), -1)
+        }
+        "C" -> when (tier) {
+            Tier.A -> vibrator.vibrate(
+                VibrationEffect.startComposition()
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, 0.4f)
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, 0.4f, 60)
+                    .compose()
+            )
+            Tier.B -> vibrator.vibrate(
+                VibrationEffect.createWaveform(longArrayOf(0, 30, 30, 30), intArrayOf(0, 100, 0, 100), -1)
+            )
+            Tier.C -> @Suppress("DEPRECATION")
+            vibrator.vibrate(longArrayOf(0, 30, 30, 30), -1)
+        }
+        else -> landmark()
+    }
+
+    fun bondSignature(order: Int) = when (order) {
+        1 -> contact()
+        2 -> when (tier) {
+            Tier.A -> vibrator.vibrate(
+                VibrationEffect.startComposition()
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, 0.5f)
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, 0.5f, 50)
+                    .compose()
+            )
+            Tier.B -> vibrator.vibrate(
+                VibrationEffect.createWaveform(longArrayOf(0, 20, 20, 20, 20, 20), intArrayOf(0, 100, 0, 100, 0, 100), -1)
+            )
+            Tier.C -> @Suppress("DEPRECATION")
+            vibrator.vibrate(longArrayOf(0, 20, 20, 20, 20, 20), -1)
+        }
+        else -> when (tier) {
+            Tier.A -> vibrator.vibrate(
+                VibrationEffect.startComposition()
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, 0.7f)
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, 0.7f, 40)
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, 0.7f, 80)
+                    .compose()
+            )
+            Tier.B -> vibrator.vibrate(
+                VibrationEffect.createWaveform(
+                    longArrayOf(0, 25, 15, 25, 15, 25), intArrayOf(0, 130, 0, 130, 0, 130), -1
+                )
+            )
+            Tier.C -> @Suppress("DEPRECATION")
+            vibrator.vibrate(longArrayOf(0, 25, 15, 25, 15, 25), -1)
+        }
+    }
+
     fun cancel() = vibrator.cancel()
 
     companion object {

@@ -15,7 +15,9 @@ data class Cue(
     val onFeature: Boolean,
     val landmark: Landmark?,
     val quadrant: Int,
-    val clamped: Boolean
+    val clamped: Boolean,
+    val touchedAtom: String? = null,
+    val touchedBond: Int? = null
 )
 
 interface MappingEngine {
@@ -27,7 +29,7 @@ object DefaultMappingEngine : MappingEngine {
     private const val FREQ_LOW = 200.0
     private const val FREQ_HIGH = 1000.0
     private const val FEATURE_TOL = 0.04
-    private const val ATOM_TOL = 0.06
+    private const val ATOM_TOL = 0.17
     private const val BOND_TOL = 0.04
     private const val LANDMARK_TOL = 0.03
 
@@ -53,20 +55,46 @@ object DefaultMappingEngine : MappingEngine {
     }
 
     private fun moleculeCue(nx: Double, ny: Double, r: MoleculeGraph): Cue {
-        val onAtom = r.atoms.any { hypot(nx - it.normX, ny - it.normY) < ATOM_TOL }
-        val onBond = !onAtom && r.bonds.any { b ->
-            val ax = r.atoms[b.fromIndex].normX; val ay = r.atoms[b.fromIndex].normY
-            val bx = r.atoms[b.toIndex].normX; val by = r.atoms[b.toIndex].normY
-            pointToSegDist(nx, ny, ax, ay, bx, by) < BOND_TOL
+        val nearestAtomIdx = r.atoms.indices.minByOrNull { i ->
+            hypot(nx - r.atoms[i].normX, ny - r.atoms[i].normY)
         }
+        val onAtom = nearestAtomIdx != null &&
+            hypot(nx - r.atoms[nearestAtomIdx].normX, ny - r.atoms[nearestAtomIdx].normY) < ATOM_TOL
+
+        val nearestBond = if (!onAtom) {
+            r.bonds.minByOrNull { b ->
+                val ax = r.atoms[b.fromIndex].normX; val ay = r.atoms[b.fromIndex].normY
+                val bx = r.atoms[b.toIndex].normX; val by = r.atoms[b.toIndex].normY
+                pointToSegDist(nx, ny, ax, ay, bx, by)
+            }.takeIf { b ->
+                if (b == null) return@takeIf false
+                val ax = r.atoms[b.fromIndex].normX; val ay = r.atoms[b.fromIndex].normY
+                val bx = r.atoms[b.toIndex].normX; val by = r.atoms[b.toIndex].normY
+                pointToSegDist(nx, ny, ax, ay, bx, by) < BOND_TOL
+            }
+        } else null
+
         val featureY = if (onAtom) {
-            r.atoms.minByOrNull { hypot(nx - it.normX, ny - it.normY) }!!.normY
+            r.atoms[nearestAtomIdx!!].normY
+        } else if (nearestBond != null) {
+            val ai = r.atoms[nearestBond.fromIndex]
+            val bi = r.atoms[nearestBond.toIndex]
+            (ai.normY + bi.normY) / 2.0
         } else {
             ny
         }
+
         val freqHz = FREQ_LOW * (FREQ_HIGH / FREQ_LOW).pow(featureY.coerceIn(0.0, 1.0))
         val nearestLandmark = r.landmarks.firstOrNull { hypot(nx - it.normX, ny - it.normY) < LANDMARK_TOL }
-        return Cue(freqHz, nx * 2.0 - 1.0, onAtom || onBond, nearestLandmark, quadrantOf(nx, ny), false)
+
+        val touchedAtom = if (onAtom) r.atoms[nearestAtomIdx!!].element else null
+        val touchedBond = nearestBond?.order
+
+        return Cue(
+            freqHz, nx * 2.0 - 1.0, onAtom || nearestBond != null,
+            nearestLandmark, quadrantOf(nx, ny), false,
+            touchedAtom = touchedAtom, touchedBond = touchedBond
+        )
     }
 
     private fun quadrantOf(nx: Double, ny: Double): Int = when {

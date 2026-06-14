@@ -79,6 +79,16 @@ class Announcer(context: Context) {
 
     fun molecule(r: MoleculeGraph) = announce(describeMolecule(r))
 
+    fun speakAtom(symbol: String) = announce(elementName(symbol))
+
+    fun speakBond(order: Int) = announce(
+        when (order) {
+            1 -> "single bond"
+            2 -> "double bond"
+            else -> "triple bond"
+        }
+    )
+
     fun release() = tts.shutdown()
 }
 
